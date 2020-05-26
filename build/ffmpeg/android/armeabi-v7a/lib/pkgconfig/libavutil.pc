@@ -1,0 +1,14 @@
+prefix=/Users/luoye/Git/Github/ffmpeg-android-build/build/ffmpeg/android/armeabi-v7a
+exec_prefix=${prefix}
+libdir=/Users/luoye/Git/Github/ffmpeg-android-build/build/ffmpeg/android/armeabi-v7a/lib
+includedir=/Users/luoye/Git/Github/ffmpeg-android-build/build/ffmpeg/android/armeabi-v7a/include
+
+Name: libavutil
+Description: FFmpeg utility library
+Version: 56.31.100
+Requires: 
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavutil -pthread -lm
+Libs.private: 
+Cflags: -I${includedir}

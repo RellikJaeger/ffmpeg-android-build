@@ -1,0 +1,14 @@
+prefix=/Users/luoye/Git/Github/ffmpeg-android-build/build/ffmpeg/android/arm64-v8a
+exec_prefix=${prefix}
+libdir=/Users/luoye/Git/Github/ffmpeg-android-build/build/ffmpeg/android/arm64-v8a/lib
+includedir=/Users/luoye/Git/Github/ffmpeg-android-build/build/ffmpeg/android/arm64-v8a/include
+
+Name: libpostproc
+Description: FFmpeg postprocessing library
+Version: 55.5.100
+Requires: libavutil >= 56.31.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lpostproc -lm
+Libs.private: 
+Cflags: -I${includedir}
