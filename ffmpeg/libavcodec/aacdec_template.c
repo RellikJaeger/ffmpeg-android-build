@@ -997,7 +997,6 @@ static int decode_audio_specific_config_gb(AACContext *ac,
     switch (m4ac->object_type) {
     case AOT_AAC_MAIN:
     case AOT_AAC_LC:
-    case AOT_AAC_SSR:
     case AOT_AAC_LTP:
     case AOT_ER_AAC_LC:
     case AOT_ER_AAC_LD:
@@ -1929,7 +1928,7 @@ static int decode_spectrum_and_dequant(AACContext *ac, INTFLOAT coef[1024],
             if (cbt_m1 < NOISE_BT - 1) {
                 for (group = 0; group < (int)g_len; group++, cfo+=128) {
                     ac->vector_pow43(cfo, off_len);
-                    ac->subband_scale(cfo, cfo, sf[idx], 34, off_len, ac->avctx);
+                    ac->subband_scale(cfo, cfo, sf[idx], 34, off_len);
                 }
             }
         }
@@ -1968,33 +1967,6 @@ static void apply_prediction(AACContext *ac, SingleChannelElement *sce)
                                   sce->ics.predictor_reset_group);
     } else
         reset_all_predictors(sce->predictor_state);
-}
-
-static void decode_gain_control(SingleChannelElement * sce, GetBitContext * gb)
-{
-    // wd_num, wd_test, aloc_size
-    static const uint8_t gain_mode[4][3] = {
-        {1, 0, 5},  // ONLY_LONG_SEQUENCE = 0,
-        {2, 1, 2},  // LONG_START_SEQUENCE,
-        {8, 0, 2},  // EIGHT_SHORT_SEQUENCE,
-        {2, 1, 5},  // LONG_STOP_SEQUENCE
-    };
-
-    const int mode = sce->ics.window_sequence[0];
-    uint8_t bd, wd, ad;
-
-    // FIXME: Store the gain control data on |sce| and do something with it.
-    uint8_t max_band = get_bits(gb, 2);
-    for (bd = 0; bd < max_band; bd++) {
-        for (wd = 0; wd < gain_mode[mode][0]; wd++) {
-            uint8_t adjust_num = get_bits(gb, 3);
-            for (ad = 0; ad < adjust_num; ad++) {
-                skip_bits(gb, 4 + ((wd == 0 && gain_mode[mode][1])
-                                     ? 4
-                                     : gain_mode[mode][2]));
-            }
-        }
-    }
 }
 
 /**
@@ -2064,11 +2036,9 @@ static int decode_ics(AACContext *ac, SingleChannelElement *sce,
                 goto fail;
         }
         if (!eld_syntax && get_bits1(gb)) {
-            decode_gain_control(sce, gb);
-            if (!ac->warned_gain_control) {
-                avpriv_report_missing_feature(ac->avctx, "Gain control");
-                ac->warned_gain_control = 1;
-            }
+            avpriv_request_sample(ac->avctx, "SSR");
+            ret = AVERROR_PATCHWELCOME;
+            goto fail;
         }
         // I see no textual basis in the spec for this occurring after SSR gain
         // control, but this is what both reference and real implmentations do
@@ -2160,7 +2130,7 @@ static void apply_intensity_stereo(AACContext *ac,
                                       coef0 + group * 128 + offsets[i],
                                       scale,
                                       23,
-                                      offsets[i + 1] - offsets[i] ,ac->avctx);
+                                      offsets[i + 1] - offsets[i]);
 #else
                         ac->fdsp->vector_fmul_scalar(coef1 + group * 128 + offsets[i],
                                                     coef0 + group * 128 + offsets[i],
@@ -2990,7 +2960,7 @@ static int parse_adts_frame_header(AACContext *ac, GetBitContext *gb)
     uint8_t layout_map[MAX_ELEM_ID*4][3];
     int layout_map_tags, ret;
 
-    size = ff_adts_header_parse(gb, &hdr_info);
+    size = avpriv_aac_parse_header(gb, &hdr_info);
     if (size > 0) {
         if (!ac->warned_num_aac_frames && hdr_info.num_aac_frames != 1) {
             // This is 2 for "VLB " audio in NSV files.
@@ -3127,7 +3097,6 @@ static int aac_decode_frame_int(AVCodecContext *avctx, void *data,
     int samples = 0, multiplier, audio_found = 0, pce_found = 0;
     int is_dmono, sce_count = 0;
     int payload_alignment;
-    uint8_t che_presence[4][MAX_ELEM_ID] = {{0}};
 
     ac->frame = data;
 
@@ -3165,17 +3134,6 @@ static int aac_decode_frame_int(AVCodecContext *avctx, void *data,
         }
 
         if (elem_type < TYPE_DSE) {
-            if (che_presence[elem_type][elem_id]) {
-                int error = che_presence[elem_type][elem_id] > 1;
-                av_log(ac->avctx, error ? AV_LOG_ERROR : AV_LOG_DEBUG, "channel element %d.%d duplicate\n",
-                       elem_type, elem_id);
-                if (error) {
-                    err = AVERROR_INVALIDDATA;
-                    goto fail;
-                }
-            }
-            che_presence[elem_type][elem_id]++;
-
             if (!(che=get_che(ac, elem_type, elem_id))) {
                 av_log(ac->avctx, AV_LOG_ERROR, "channel element %d.%d is not allocated\n",
                        elem_type, elem_id);
@@ -3341,14 +3299,20 @@ static int aac_decode_frame(AVCodecContext *avctx, void *data,
                                        AV_PKT_DATA_JP_DUALMONO,
                                        &jp_dualmono_size);
 
-    if (new_extradata) {
-        /* discard previous configuration */
-        ac->oc[1].status = OC_NONE;
-        err = decode_audio_specific_config(ac, ac->avctx, &ac->oc[1].m4ac,
-                                           new_extradata,
-                                           new_extradata_size * 8LL, 1);
-        if (err < 0) {
-            return err;
+    if (new_extradata && 0) {
+        av_free(avctx->extradata);
+        avctx->extradata = av_mallocz(new_extradata_size +
+                                      AV_INPUT_BUFFER_PADDING_SIZE);
+        if (!avctx->extradata)
+            return AVERROR(ENOMEM);
+        avctx->extradata_size = new_extradata_size;
+        memcpy(avctx->extradata, new_extradata, new_extradata_size);
+        push_output_configuration(ac);
+        if (decode_audio_specific_config(ac, ac->avctx, &ac->oc[1].m4ac,
+                                         avctx->extradata,
+                                         avctx->extradata_size*8LL, 1) < 0) {
+            pop_output_configuration(ac);
+            return AVERROR_INVALIDDATA;
         }
     }
 

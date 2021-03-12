@@ -652,7 +652,7 @@ void ff_ac3_process_exponents(AC3EncodeContext *s)
  */
 static void count_frame_bits_fixed(AC3EncodeContext *s)
 {
-    static const uint8_t frame_bits_inc[8] = { 0, 0, 2, 2, 2, 4, 2, 4 };
+    static const int frame_bits_inc[8] = { 0, 0, 2, 2, 2, 4, 2, 4 };
     int blk;
     int frame_bits;
 
@@ -1800,7 +1800,7 @@ static int validate_float_option(float v, const float *v_list, int v_list_size)
             break;
     }
     if (i == v_list_size)
-        return AVERROR(EINVAL);
+        return -1;
 
     return i;
 }
@@ -2051,8 +2051,7 @@ av_cold int ff_ac3_encode_close(AVCodecContext *avctx)
         av_freep(&block->cpl_coord_mant);
     }
 
-    if (s->mdct_end)
-        s->mdct_end(s);
+    s->mdct_end(s);
 
     return 0;
 }
@@ -2434,7 +2433,7 @@ av_cold int ff_ac3_encode_init(AVCodecContext *avctx)
 
     ret = validate_options(s);
     if (ret)
-        goto init_fail;
+        return ret;
 
     avctx->frame_size = AC3_BLOCK_SIZE * s->num_blocks;
     avctx->initial_padding = AC3_BLOCK_SIZE;

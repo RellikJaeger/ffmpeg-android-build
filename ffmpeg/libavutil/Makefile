@@ -24,14 +24,12 @@ HEADERS = adler32.h                                                     \
           dict.h                                                        \
           display.h                                                     \
           downmix_info.h                                                \
-          encryption_info.h                                             \
           error.h                                                       \
           eval.h                                                        \
           fifo.h                                                        \
           file.h                                                        \
           frame.h                                                       \
           hash.h                                                        \
-          hdr_dynamic_metadata.h                                        \
           hmac.h                                                        \
           hwcontext.h                                                   \
           hwcontext_cuda.h                                              \
@@ -39,7 +37,6 @@ HEADERS = adler32.h                                                     \
           hwcontext_drm.h                                               \
           hwcontext_dxva2.h                                             \
           hwcontext_qsv.h                                               \
-          hwcontext_mediacodec.h                                        \
           hwcontext_vaapi.h                                             \
           hwcontext_videotoolbox.h                                      \
           hwcontext_vdpau.h                                             \
@@ -79,9 +76,10 @@ HEADERS = adler32.h                                                     \
           version.h                                                     \
           xtea.h                                                        \
           tea.h                                                         \
-          tx.h                                                          \
 
 HEADERS-$(CONFIG_LZO)                   += lzo.h
+
+HEADERS-$(CONFIG_OPENCL)                += opencl.h
 
 ARCH_HEADERS = bswap.h                                                  \
                intmath.h                                                \
@@ -96,7 +94,6 @@ OBJS = adler32.o                                                        \
        aes_ctr.o                                                        \
        audio_fifo.o                                                     \
        avstring.o                                                       \
-       avsscanf.o                                                       \
        base64.o                                                         \
        blowfish.o                                                       \
        bprint.o                                                         \
@@ -111,7 +108,6 @@ OBJS = adler32.o                                                        \
        dict.o                                                           \
        display.o                                                        \
        downmix_info.o                                                   \
-       encryption_info.o                                                \
        error.o                                                          \
        eval.o                                                           \
        fifo.o                                                           \
@@ -121,7 +117,6 @@ OBJS = adler32.o                                                        \
        fixed_dsp.o                                                      \
        frame.o                                                          \
        hash.o                                                           \
-       hdr_dynamic_metadata.o                                           \
        hmac.o                                                           \
        hwcontext.o                                                      \
        imgutils.o                                                       \
@@ -160,16 +155,16 @@ OBJS = adler32.o                                                        \
        xga_font_data.o                                                  \
        xtea.o                                                           \
        tea.o                                                            \
-       tx.o                                                             \
+
+OBJS-$(!HAVE_ATOMICS_NATIVE)            += atomic.o                     \
 
 OBJS-$(CONFIG_CUDA)                     += hwcontext_cuda.o
 OBJS-$(CONFIG_D3D11VA)                  += hwcontext_d3d11va.o
 OBJS-$(CONFIG_DXVA2)                    += hwcontext_dxva2.o
+OBJS-$(CONFIG_QSV)                   += hwcontext_qsv.o
 OBJS-$(CONFIG_LIBDRM)                   += hwcontext_drm.o
 OBJS-$(CONFIG_LZO)                      += lzo.o
-OBJS-$(CONFIG_MEDIACODEC)               += hwcontext_mediacodec.o
-OBJS-$(CONFIG_OPENCL)                   += hwcontext_opencl.o
-OBJS-$(CONFIG_QSV)                      += hwcontext_qsv.o
+OBJS-$(CONFIG_OPENCL)                   += opencl.o opencl_internal.o
 OBJS-$(CONFIG_VAAPI)                    += hwcontext_vaapi.o
 OBJS-$(CONFIG_VIDEOTOOLBOX)             += hwcontext_videotoolbox.o
 OBJS-$(CONFIG_VDPAU)                    += hwcontext_vdpau.o
@@ -180,19 +175,22 @@ OBJS += $(COMPAT_OBJS:%=../compat/%)
 SLIBOBJS-$(HAVE_GNU_WINDRES)            += avutilres.o
 
 SKIPHEADERS-$(HAVE_CUDA_H)             += hwcontext_cuda.h
-SKIPHEADERS-$(CONFIG_CUDA)             += hwcontext_cuda_internal.h     \
-                                          cuda_check.h
+SKIPHEADERS-$(CONFIG_CUDA)             += hwcontext_cuda_internal.h
 SKIPHEADERS-$(CONFIG_D3D11VA)          += hwcontext_d3d11va.h
 SKIPHEADERS-$(CONFIG_DXVA2)            += hwcontext_dxva2.h
-SKIPHEADERS-$(CONFIG_QSV)              += hwcontext_qsv.h
-SKIPHEADERS-$(CONFIG_OPENCL)           += hwcontext_opencl.h
+SKIPHEADERS-$(CONFIG_QSV)           += hwcontext_qsv.h
 SKIPHEADERS-$(CONFIG_VAAPI)            += hwcontext_vaapi.h
 SKIPHEADERS-$(CONFIG_VIDEOTOOLBOX)     += hwcontext_videotoolbox.h
 SKIPHEADERS-$(CONFIG_VDPAU)            += hwcontext_vdpau.h
+SKIPHEADERS-$(HAVE_ATOMICS_GCC)        += atomic_gcc.h
+SKIPHEADERS-$(HAVE_ATOMICS_SUNCC)      += atomic_suncc.h
+SKIPHEADERS-$(HAVE_ATOMICS_WIN32)      += atomic_win32.h
+SKIPHEADERS-$(CONFIG_OPENCL)           += opencl.h
 
 TESTPROGS = adler32                                                     \
             aes                                                         \
             aes_ctr                                                     \
+            atomic                                                      \
             audio_fifo                                                  \
             avstring                                                    \
             base64                                                      \
@@ -206,15 +204,12 @@ TESTPROGS = adler32                                                     \
             des                                                         \
             dict                                                        \
             display                                                     \
-            encryption_info                                             \
             error                                                       \
             eval                                                        \
             file                                                        \
             fifo                                                        \
             hash                                                        \
             hmac                                                        \
-            hwdevice                                                    \
-            integer                                                     \
             imgutils                                                    \
             lfg                                                         \
             lls                                                         \

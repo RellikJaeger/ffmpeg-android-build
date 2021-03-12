@@ -75,11 +75,11 @@
 #include "aac.h"
 #include "aactab.h"
 #include "aacdectab.h"
-#include "adts_header.h"
 #include "cbrt_data.h"
 #include "sbr.h"
 #include "aacsbr.h"
 #include "mpeg4audio.h"
+#include "aacadtsdec.h"
 #include "profiles.h"
 #include "libavutil/intfloat.h"
 
@@ -162,7 +162,7 @@ static void vector_pow43(int *coefs, int len)
     }
 }
 
-static void subband_scale(int *dst, int *src, int scale, int offset, int len, void *log_context)
+static void subband_scale(int *dst, int *src, int scale, int offset, int len)
 {
     int ssign = scale < 0 ? -1 : 1;
     int s = FFABS(scale);
@@ -189,7 +189,7 @@ static void subband_scale(int *dst, int *src, int scale, int offset, int len, vo
             dst[i] = out * (unsigned)ssign;
         }
     } else {
-        av_log(log_context, AV_LOG_ERROR, "Overflow in subband_scale()\n");
+        av_log(NULL, AV_LOG_ERROR, "Overflow in subband_scale()\n");
     }
 }
 

@@ -34,7 +34,6 @@
 #include "avformat.h"
 #include "avio.h"
 #include "avio_internal.h"
-#include "id3v2.h"
 #include "internal.h"
 #include "metadata.h"
 #include "pcm.h"
@@ -129,7 +128,7 @@ static int64_t find_tag(WAVDemuxContext * wav, AVIOContext *pb, uint32_t tag1)
     return size;
 }
 
-static int wav_probe(const AVProbeData *p)
+static int wav_probe(AVProbeData *p)
 {
     /* check file header */
     if (p->buf_size <= 32)
@@ -503,18 +502,6 @@ static int wav_read_header(AVFormatContext *s)
                 ff_read_riff_info(s, size - 4);
             }
             break;
-        case MKTAG('I', 'D', '3', ' '):
-        case MKTAG('i', 'd', '3', ' '): {
-            ID3v2ExtraMeta *id3v2_extra_meta = NULL;
-            ff_id3v2_read_dict(pb, &s->internal->id3v2_meta, ID3v2_DEFAULT_MAGIC, &id3v2_extra_meta);
-            if (id3v2_extra_meta) {
-                ff_id3v2_parse_apic(s, &id3v2_extra_meta);
-                ff_id3v2_parse_chapters(s, &id3v2_extra_meta);
-                ff_id3v2_parse_priv(s, &id3v2_extra_meta);
-            }
-            ff_id3v2_free_extra_meta(&id3v2_extra_meta);
-            }
-            break;
         }
 
         /* seek to next tag unless we know that we'll run into EOF */
@@ -776,7 +763,7 @@ AVInputFormat ff_wav_demuxer = {
 #endif /* CONFIG_WAV_DEMUXER */
 
 #if CONFIG_W64_DEMUXER
-static int w64_probe(const AVProbeData *p)
+static int w64_probe(AVProbeData *p)
 {
     if (p->buf_size <= 40)
         return 0;
@@ -837,7 +824,6 @@ static int w64_read_header(AVFormatContext *s)
             samples = avio_rl64(pb);
             if (samples > 0)
                 st->duration = samples;
-            avio_skip(pb, FFALIGN(size, INT64_C(8)) - 32);
         } else if (!memcmp(guid, ff_w64_guid_data, 16)) {
             wav->data_end = avio_tell(pb) + size - 24;
 

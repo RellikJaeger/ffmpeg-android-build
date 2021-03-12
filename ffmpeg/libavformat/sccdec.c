@@ -29,7 +29,7 @@ typedef struct SCCContext {
     FFDemuxSubtitlesQueue q;
 } SCCContext;
 
-static int scc_probe(const AVProbeData *p)
+static int scc_probe(AVProbeData *p)
 {
     char buf[18];
     FFTextReader tr;
@@ -110,7 +110,6 @@ static int scc_read_header(AVFormatContext *s)
         ts_end = (hh2 * 3600LL + mm2 * 60LL + ss2) * 1000LL + fs2 * 33;
         count++;
 
-try_again:
         lline = (char *)&line;
         lline += 12;
 
@@ -133,22 +132,21 @@ try_again:
 
         sub = ff_subtitles_queue_insert(&scc->q, out, i, 0);
         if (!sub)
-            return AVERROR(ENOMEM);
+            goto fail;
 
         sub->pos = pos;
         sub->pts = ts_start;
         sub->duration = FFMAX(1200, ts_end - ts_start);
         memmove(line, line2, sizeof(line));
-        line2[0] = 0;
         FFSWAP(ptrdiff_t, len, len2);
     }
-
-    if (line[0])
-        goto try_again;
 
     ff_subtitles_queue_finalize(s, &scc->q);
 
     return ret;
+fail:
+    ff_subtitles_queue_clean(&scc->q);
+    return AVERROR(ENOMEM);
 }
 
 static int scc_read_packet(AVFormatContext *s, AVPacket *pkt)

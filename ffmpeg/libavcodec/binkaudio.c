@@ -141,7 +141,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
     else if (CONFIG_BINKAUDIO_DCT_DECODER)
         ff_dct_init(&s->trans.dct, frame_len_bits, DCT_III);
     else
-        av_assert0(0);
+        return -1;
 
     s->pkt = av_packet_alloc();
     if (!s->pkt)

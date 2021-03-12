@@ -46,23 +46,17 @@
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "unsharp.h"
+#include "unsharp_opencl.h"
 
-typedef struct TheadData {
-    UnsharpFilterParam *fp;
-    uint8_t       *dst;
-    const uint8_t *src;
-    int dst_stride;
-    int src_stride;
-    int width;
-    int height;
-} ThreadData;
-
-static int unsharp_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
+static void apply_unsharp(      uint8_t *dst, int dst_stride,
+                          const uint8_t *src, int src_stride,
+                          int width, int height, UnsharpFilterParam *fp)
 {
-    ThreadData *td = arg;
-    UnsharpFilterParam *fp = td->fp;
     uint32_t **sc = fp->sc;
-    uint32_t *sr = fp->sr;
+    uint32_t sr[MAX_MATRIX_SIZE - 1], tmp1, tmp2;
+
+    int32_t res;
+    int x, y, z;
     const uint8_t *src2 = NULL;  //silence a warning
     const int amount = fp->amount;
     const int steps_x = fp->steps_x;
@@ -70,54 +64,30 @@ static int unsharp_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs
     const int scalebits = fp->scalebits;
     const int32_t halfscale = fp->halfscale;
 
-    uint8_t *dst = td->dst;
-    const uint8_t *src = td->src;
-    const int dst_stride = td->dst_stride;
-    const int src_stride = td->src_stride;
-    const int width = td->width;
-    const int height = td->height;
-    const int sc_offset = jobnr * 2 * steps_y;
-    const int sr_offset = jobnr * (MAX_MATRIX_SIZE - 1);
-    const int slice_start = (height * jobnr) / nb_jobs;
-    const int slice_end = (height * (jobnr+1)) / nb_jobs;
-
-    int32_t res;
-    int x, y, z;
-    uint32_t tmp1, tmp2;
-
     if (!amount) {
-        av_image_copy_plane(dst + slice_start * dst_stride, dst_stride,
-                            src + slice_start * src_stride, src_stride,
-                            width, slice_end - slice_start);
-        return 0;
+        av_image_copy_plane(dst, dst_stride, src, src_stride, width, height);
+        return;
     }
 
     for (y = 0; y < 2 * steps_y; y++)
-        memset(sc[sc_offset + y], 0, sizeof(sc[y][0]) * (width + 2 * steps_x));
+        memset(sc[y], 0, sizeof(sc[y][0]) * (width + 2 * steps_x));
 
-    // if this is not the first tile, we start from (slice_start - steps_y),
-    // so we can get smooth result at slice boundary
-    if (slice_start > steps_y) {
-        src += (slice_start - steps_y) * src_stride;
-        dst += (slice_start - steps_y) * dst_stride;
-    }
-
-    for (y = -steps_y + slice_start; y < steps_y + slice_end; y++) {
+    for (y = -steps_y; y < height + steps_y; y++) {
         if (y < height)
             src2 = src;
 
-        memset(sr + sr_offset, 0, sizeof(sr[0]) * (2 * steps_x - 1));
+        memset(sr, 0, sizeof(sr[0]) * (2 * steps_x - 1));
         for (x = -steps_x; x < width + steps_x; x++) {
             tmp1 = x <= 0 ? src2[0] : x >= width ? src2[width-1] : src2[x];
             for (z = 0; z < steps_x * 2; z += 2) {
-                tmp2 = sr[sr_offset + z + 0] + tmp1; sr[sr_offset + z + 0] = tmp1;
-                tmp1 = sr[sr_offset + z + 1] + tmp2; sr[sr_offset + z + 1] = tmp2;
+                tmp2 = sr[z + 0] + tmp1; sr[z + 0] = tmp1;
+                tmp1 = sr[z + 1] + tmp2; sr[z + 1] = tmp2;
             }
             for (z = 0; z < steps_y * 2; z += 2) {
-                tmp2 = sc[sc_offset + z + 0][x + steps_x] + tmp1; sc[sc_offset + z + 0][x + steps_x] = tmp1;
-                tmp1 = sc[sc_offset + z + 1][x + steps_x] + tmp2; sc[sc_offset + z + 1][x + steps_x] = tmp2;
+                tmp2 = sc[z + 0][x + steps_x] + tmp1; sc[z + 0][x + steps_x] = tmp1;
+                tmp1 = sc[z + 1][x + steps_x] + tmp2; sc[z + 1][x + steps_x] = tmp2;
             }
-            if (x >= steps_x && y >= (steps_y + slice_start)) {
+            if (x >= steps_x && y >= steps_y) {
                 const uint8_t *srx = src - steps_y * src_stride + x - steps_x;
                 uint8_t *dsx       = dst - steps_y * dst_stride + x - steps_x;
 
@@ -130,7 +100,6 @@ static int unsharp_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs
             src += src_stride;
         }
     }
-    return 0;
 }
 
 static int apply_unsharp_c(AVFilterContext *ctx, AVFrame *in, AVFrame *out)
@@ -139,8 +108,6 @@ static int apply_unsharp_c(AVFilterContext *ctx, AVFrame *in, AVFrame *out)
     UnsharpContext *s = ctx->priv;
     int i, plane_w[3], plane_h[3];
     UnsharpFilterParam *fp[3];
-    ThreadData td;
-
     plane_w[0] = inlink->w;
     plane_w[1] = plane_w[2] = AV_CEIL_RSHIFT(inlink->w, s->hsub);
     plane_h[0] = inlink->h;
@@ -148,14 +115,7 @@ static int apply_unsharp_c(AVFilterContext *ctx, AVFrame *in, AVFrame *out)
     fp[0] = &s->luma;
     fp[1] = fp[2] = &s->chroma;
     for (i = 0; i < 3; i++) {
-        td.fp = fp[i];
-        td.dst = out->data[i];
-        td.src = in->data[i];
-        td.width = plane_w[i];
-        td.height = plane_h[i];
-        td.dst_stride = out->linesize[i];
-        td.src_stride = in->linesize[i];
-        ctx->internal->execute(ctx, unsharp_slice, &td, NULL, FFMIN(plane_h[i], s->nb_threads));
+        apply_unsharp(out->data[i], out->linesize[i], in->data[i], in->linesize[i], plane_w[i], plane_h[i], fp[i]);
     }
     return 0;
 }
@@ -174,7 +134,9 @@ static void set_filter_param(UnsharpFilterParam *fp, int msize_x, int msize_y, f
 
 static av_cold int init(AVFilterContext *ctx)
 {
+    int ret = 0;
     UnsharpContext *s = ctx->priv;
+
 
     set_filter_param(&s->luma,   s->lmsize_x, s->lmsize_y, s->lamount);
     set_filter_param(&s->chroma, s->cmsize_x, s->cmsize_y, s->camount);
@@ -184,6 +146,16 @@ static av_cold int init(AVFilterContext *ctx)
         return AVERROR(EINVAL);
     }
     s->apply_unsharp = apply_unsharp_c;
+    if (!CONFIG_OPENCL && s->opencl) {
+        av_log(ctx, AV_LOG_ERROR, "OpenCL support was not enabled in this build, cannot be selected\n");
+        return AVERROR(EINVAL);
+    }
+    if (CONFIG_OPENCL && s->opencl) {
+        s->apply_unsharp = ff_opencl_apply_unsharp;
+        ret = ff_opencl_unsharp_init(ctx);
+        if (ret < 0)
+            return ret;
+    }
     return 0;
 }
 
@@ -204,7 +176,6 @@ static int query_formats(AVFilterContext *ctx)
 static int init_filter_param(AVFilterContext *ctx, UnsharpFilterParam *fp, const char *effect_type, int width)
 {
     int z;
-    UnsharpContext *s = ctx->priv;
     const char *effect = fp->amount == 0 ? "none" : fp->amount < 0 ? "blur" : "sharpen";
 
     if  (!(fp->msize_x & fp->msize_y & 1)) {
@@ -217,12 +188,7 @@ static int init_filter_param(AVFilterContext *ctx, UnsharpFilterParam *fp, const
     av_log(ctx, AV_LOG_VERBOSE, "effect:%s type:%s msize_x:%d msize_y:%d amount:%0.2f\n",
            effect, effect_type, fp->msize_x, fp->msize_y, fp->amount / 65535.0);
 
-    fp->sr = av_malloc_array((MAX_MATRIX_SIZE - 1) * s->nb_threads, sizeof(uint32_t));
-    fp->sc = av_mallocz_array(2 * fp->steps_y * s->nb_threads, sizeof(uint32_t *));
-    if (!fp->sr || !fp->sc)
-        return AVERROR(ENOMEM);
-
-    for (z = 0; z < 2 * fp->steps_y * s->nb_threads; z++)
+    for (z = 0; z < 2 * fp->steps_y; z++)
         if (!(fp->sc[z] = av_malloc_array(width + 2 * fp->steps_x,
                                           sizeof(*(fp->sc[z])))))
             return AVERROR(ENOMEM);
@@ -239,11 +205,6 @@ static int config_props(AVFilterLink *link)
     s->hsub = desc->log2_chroma_w;
     s->vsub = desc->log2_chroma_h;
 
-    // ensure (height / nb_threads) > 4 * steps_y,
-    // so that we don't have too much overlap between two threads
-    s->nb_threads = FFMIN(ff_filter_get_nb_threads(link->dst),
-                          link->h / (4 * s->luma.steps_y));
-
     ret = init_filter_param(link->dst, &s->luma,   "luma",   link->w);
     if (ret < 0)
         return ret;
@@ -254,24 +215,24 @@ static int config_props(AVFilterLink *link)
     return 0;
 }
 
-static void free_filter_param(UnsharpFilterParam *fp, int nb_threads)
+static void free_filter_param(UnsharpFilterParam *fp)
 {
     int z;
 
-    if (fp->sc) {
-        for (z = 0; z < 2 * fp->steps_y * nb_threads; z++)
-            av_freep(&fp->sc[z]);
-        av_freep(&fp->sc);
-    }
-    av_freep(&fp->sr);
+    for (z = 0; z < 2 * fp->steps_y; z++)
+        av_freep(&fp->sc[z]);
 }
 
 static av_cold void uninit(AVFilterContext *ctx)
 {
     UnsharpContext *s = ctx->priv;
 
-    free_filter_param(&s->luma, s->nb_threads);
-    free_filter_param(&s->chroma, s->nb_threads);
+    if (CONFIG_OPENCL && s->opencl) {
+        ff_opencl_unsharp_uninit(ctx);
+    }
+
+    free_filter_param(&s->luma);
+    free_filter_param(&s->chroma);
 }
 
 static int filter_frame(AVFilterLink *link, AVFrame *in)
@@ -287,9 +248,14 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
         return AVERROR(ENOMEM);
     }
     av_frame_copy_props(out, in);
+    if (CONFIG_OPENCL && s->opencl) {
+        ret = ff_opencl_unsharp_process_inout_buf(link->dst, in, out);
+        if (ret < 0)
+            goto end;
+    }
 
     ret = s->apply_unsharp(link->dst, in, out);
-
+end:
     av_frame_free(&in);
 
     if (ret < 0) {
@@ -316,7 +282,7 @@ static const AVOption unsharp_options[] = {
     { "cy",             "set chroma matrix vertical size",   OFFSET(cmsize_y), AV_OPT_TYPE_INT,   { .i64 = 5 }, MIN_SIZE, MAX_SIZE, FLAGS },
     { "chroma_amount",  "set chroma effect strength",        OFFSET(camount),  AV_OPT_TYPE_FLOAT, { .dbl = 0 },       -2,        5, FLAGS },
     { "ca",             "set chroma effect strength",        OFFSET(camount),  AV_OPT_TYPE_FLOAT, { .dbl = 0 },       -2,        5, FLAGS },
-    { "opencl",         "ignored",                           OFFSET(opencl),   AV_OPT_TYPE_BOOL,  { .i64 = 0 },        0,        1, FLAGS },
+    { "opencl",         "use OpenCL filtering capabilities", OFFSET(opencl),   AV_OPT_TYPE_BOOL,  { .i64 = 0 },        0,        1, FLAGS },
     { NULL }
 };
 
@@ -350,5 +316,5 @@ AVFilter ff_vf_unsharp = {
     .query_formats = query_formats,
     .inputs        = avfilter_vf_unsharp_inputs,
     .outputs       = avfilter_vf_unsharp_outputs,
-    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC | AVFILTER_FLAG_SLICE_THREADS,
+    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
 };

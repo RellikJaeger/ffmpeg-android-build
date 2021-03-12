@@ -3,7 +3,7 @@
 ### 中文文档：
 
 1. 目前该脚本支持armeabi-v7a arm64-v8a，目前我对FFmpeg裁剪了很多目前编译出来的库4M多，音视频开发常见的功能都包含进去了
-2. ffmpeg 版本4.2.3
+2. ffmpeg 版本3.4.8
 3. x264 版本0.160.x (目前最新)
 4. NDK版本r14b，下载地址：https://developer.android.com/ndk/downloads/older_releases (这个是Google的需要科学上网, 我下载了一份放到了我的服务器上：https://www.bzblog.online/public/android-ndk-r14b-darwin-x86_64.zip)
 5. build目录下是已经编译好的, 如果不能编译就先用着吧
@@ -28,7 +28,7 @@ x264下载地址： https://www.videolan.org/developers/x264.html  需要注意�
 ### English documentation：
 
 1. The script currently supports armeabi-v7a arm64-v8a. At present, I have cropped a lot of the currently compiled library 4M for FFmpeg, and the common functions of audio and video development are included.
-2. ffmpeg version 4.2.3
+2. ffmpeg version 3.4.8
 3. x264 version 0.160.x (currently the latest)
 4. NDK version r14b, download address: https://developer.android.com/ndk/downloads/older_releases
 5. The build directory is already compiled, if you can't compile, use it first

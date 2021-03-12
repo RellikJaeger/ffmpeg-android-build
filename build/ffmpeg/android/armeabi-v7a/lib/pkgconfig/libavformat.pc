@@ -1,14 +1,14 @@
-prefix=/Users/luoye/Git/Github/ffmpeg-android-build/build/ffmpeg/android/armeabi-v7a
+prefix=/Users/guaishou/Git/Github/ffmpeg-android-build/build/ffmpeg/android/armeabi-v7a
 exec_prefix=${prefix}
-libdir=/Users/luoye/Git/Github/ffmpeg-android-build/build/ffmpeg/android/armeabi-v7a/lib
-includedir=/Users/luoye/Git/Github/ffmpeg-android-build/build/ffmpeg/android/armeabi-v7a/include
+libdir=/Users/guaishou/Git/Github/ffmpeg-android-build/build/ffmpeg/android/armeabi-v7a/lib
+includedir=/Users/guaishou/Git/Github/ffmpeg-android-build/build/ffmpeg/android/armeabi-v7a/include
 
 Name: libavformat
 Description: FFmpeg container format library
-Version: 58.29.100
-Requires: libavcodec >= 58.54.100, libavutil >= 56.31.100
+Version: 57.83.100
+Requires: libavcodec >= 57.107.100, libavutil >= 55.78.100
 Requires.private: 
 Conflicts:
-Libs: -L${libdir}  -lavformat -lm -lz
+Libs: -L${libdir}  -lavformat -lx264 -lm -lz -pthread -pthread -lgcc
 Libs.private: 
 Cflags: -I${includedir}

@@ -93,10 +93,6 @@ int ff_mpeg4audio_get_config_gb(MPEG4AudioConfig *c, GetBitContext *gb,
     c->chan_config = get_bits(gb, 4);
     if (c->chan_config < FF_ARRAY_ELEMS(ff_mpeg4audio_channels))
         c->channels = ff_mpeg4audio_channels[c->chan_config];
-    else {
-        av_log(NULL, AV_LOG_ERROR, "Invalid chan_config %d\n", c->chan_config);
-        return AVERROR_INVALIDDATA;
-    }
     c->sbr = -1;
     c->ps  = -1;
     if (c->object_type == AOT_SBR || (c->object_type == AOT_PS &&
@@ -170,4 +166,44 @@ int avpriv_mpeg4audio_get_config(MPEG4AudioConfig *c, const uint8_t *buf,
         return ret;
 
     return ff_mpeg4audio_get_config_gb(c, &gb, sync_extension);
+}
+
+static av_always_inline unsigned int copy_bits(PutBitContext *pb,
+                                               GetBitContext *gb,
+                                               int bits)
+{
+    unsigned int el = get_bits(gb, bits);
+    put_bits(pb, bits, el);
+    return el;
+}
+
+int avpriv_copy_pce_data(PutBitContext *pb, GetBitContext *gb)
+{
+    int five_bit_ch, four_bit_ch, comment_size, bits;
+    int offset = put_bits_count(pb);
+
+    copy_bits(pb, gb, 10);                  //Tag, Object Type, Frequency
+    five_bit_ch  = copy_bits(pb, gb, 4);    //Front
+    five_bit_ch += copy_bits(pb, gb, 4);    //Side
+    five_bit_ch += copy_bits(pb, gb, 4);    //Back
+    four_bit_ch  = copy_bits(pb, gb, 2);    //LFE
+    four_bit_ch += copy_bits(pb, gb, 3);    //Data
+    five_bit_ch += copy_bits(pb, gb, 4);    //Coupling
+    if (copy_bits(pb, gb, 1))               //Mono Mixdown
+        copy_bits(pb, gb, 4);
+    if (copy_bits(pb, gb, 1))               //Stereo Mixdown
+        copy_bits(pb, gb, 4);
+    if (copy_bits(pb, gb, 1))               //Matrix Mixdown
+        copy_bits(pb, gb, 3);
+    for (bits = five_bit_ch*5+four_bit_ch*4; bits > 16; bits -= 16)
+        copy_bits(pb, gb, 16);
+    if (bits)
+        copy_bits(pb, gb, bits);
+    avpriv_align_put_bits(pb);
+    align_get_bits(gb);
+    comment_size = copy_bits(pb, gb, 8);
+    for (; comment_size > 0; comment_size--)
+        copy_bits(pb, gb, 8);
+
+    return put_bits_count(pb) - offset;
 }

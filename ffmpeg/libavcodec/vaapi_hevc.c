@@ -122,6 +122,8 @@ static int vaapi_hevc_start_frame(AVCodecContext          *avctx,
     pic->pic.output_surface = ff_vaapi_get_surface_id(h->ref->frame);
 
     pic->pic_param = (VAPictureParameterBufferHEVC) {
+        .pic_fields.value                             = 0,
+        .slice_parsing_fields.value                   = 0,
         .pic_width_in_luma_samples                    = sps->width,
         .pic_height_in_luma_samples                   = sps->height,
         .log2_min_luma_coding_block_size_minus3       = sps->log2_min_cb_size - 3,
@@ -421,7 +423,7 @@ static int vaapi_hevc_decode_slice(AVCodecContext *avctx,
     return 0;
 }
 
-const AVHWAccel ff_hevc_vaapi_hwaccel = {
+AVHWAccel ff_hevc_vaapi_hwaccel = {
     .name                 = "hevc_vaapi",
     .type                 = AVMEDIA_TYPE_VIDEO,
     .id                   = AV_CODEC_ID_HEVC,
@@ -432,7 +434,6 @@ const AVHWAccel ff_hevc_vaapi_hwaccel = {
     .frame_priv_data_size = sizeof(VAAPIDecodePictureHEVC),
     .init                 = ff_vaapi_decode_init,
     .uninit               = ff_vaapi_decode_uninit,
-    .frame_params         = ff_vaapi_common_frame_params,
     .priv_data_size       = sizeof(VAAPIDecodeContext),
     .caps_internal        = HWACCEL_CAP_ASYNC_SAFE,
 };

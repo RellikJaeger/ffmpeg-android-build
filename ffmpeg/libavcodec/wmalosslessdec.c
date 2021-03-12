@@ -184,7 +184,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
     unsigned int channel_mask;
     int i, log2_max_num_subframes;
 
-    if (avctx->block_align <= 0) {
+    if (avctx->block_align <= 0 || avctx->block_align > (1<<21)) {
         av_log(avctx, AV_LOG_ERROR, "block_align is not set or invalid\n");
         return AVERROR(EINVAL);
     }
@@ -679,7 +679,7 @@ static void mclms_predict(WmallDecodeCtx *s, int icoef, int *pred)
         for (i = 0; i < ich; i++)
             pred[ich] += (uint32_t)s->channel_residues[i][icoef] *
                          s->mclms_coeffs_cur[i + num_channels * ich];
-        pred[ich] += (1 << s->mclms_scaling) >> 1;
+        pred[ich] += (1U << s->mclms_scaling) >> 1;
         pred[ich] >>= s->mclms_scaling;
         s->channel_residues[ich][icoef] += (unsigned)pred[ich];
     }
@@ -761,7 +761,8 @@ static void lms_update ## bits (WmallDecodeCtx *s, int ich, int ilms, int input)
 static void revert_cdlms ## bits (WmallDecodeCtx *s, int ch, \
                                   int coef_begin, int coef_end) \
 { \
-    int icoef, pred, ilms, num_lms, residue, input; \
+    int icoef, ilms, num_lms, residue, input; \
+    unsigned pred;\
  \
     num_lms = s->cdlms_ttl[ch]; \
     for (ilms = num_lms - 1; ilms >= 0; ilms--) { \
@@ -775,7 +776,7 @@ static void revert_cdlms ## bits (WmallDecodeCtx *s, int ch, \
                                                         s->cdlms[ch][ilms].recent, \
                                                         FFALIGN(s->cdlms[ch][ilms].order, ROUND), \
                                                         WMASIGN(residue)); \
-            input = residue + (unsigned)(pred >> s->cdlms[ch][ilms].scaling); \
+            input = residue + (unsigned)((int)pred >> s->cdlms[ch][ilms].scaling); \
             lms_update ## bits(s, ch, ilms, input); \
             s->channel_residues[ch][icoef] = input; \
         } \

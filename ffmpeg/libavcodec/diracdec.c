@@ -26,7 +26,6 @@
  * @author Marco Gerards <marco@gnu.org>, David Conrad, Jordi Ortiz <nenjordi@gmail.com>
  */
 
-#include "libavutil/pixdesc.h"
 #include "libavutil/thread.h"
 #include "avcodec.h"
 #include "get_bits.h"
@@ -488,7 +487,7 @@ UNPACK_ARITH(10, int32_t)
  * Decode the coeffs in the rectangle defined by left, right, top, bottom
  * [DIRAC_STD] 13.4.3.2 Codeblock unpacking loop. codeblock()
  */
-static inline int codeblock(DiracContext *s, SubBand *b,
+static inline void codeblock(DiracContext *s, SubBand *b,
                              GetBitContext *gb, DiracArith *c,
                              int left, int right, int top, int bottom,
                              int blockcnt_one, int is_arith)
@@ -505,7 +504,7 @@ static inline int codeblock(DiracContext *s, SubBand *b,
             zero_block = get_bits1(gb);
 
         if (zero_block)
-            return 0;
+            return;
     }
 
     if (s->codeblock_mode && !(s->old_delta_quant && blockcnt_one)) {
@@ -516,7 +515,7 @@ static inline int codeblock(DiracContext *s, SubBand *b,
             quant = dirac_get_se_golomb(gb);
         if (quant > INT_MAX - b->quant || b->quant + quant < 0) {
             av_log(s->avctx, AV_LOG_ERROR, "Invalid quant\n");
-            return AVERROR_INVALIDDATA;
+            return;
         }
         b->quant += quant;
     }
@@ -524,7 +523,7 @@ static inline int codeblock(DiracContext *s, SubBand *b,
     if (b->quant > (DIRAC_MAX_QUANT_INDEX - 1)) {
         av_log(s->avctx, AV_LOG_ERROR, "Unsupported quant %d\n", b->quant);
         b->quant = 0;
-        return AVERROR_INVALIDDATA;
+        return;
     }
 
     qfactor = ff_dirac_qscale_tab[b->quant];
@@ -537,8 +536,6 @@ static inline int codeblock(DiracContext *s, SubBand *b,
     buf = b->ibuf + top * b->stride;
     if (is_arith) {
         for (y = top; y < bottom; y++) {
-            if (c->error)
-                return c->error;
             for (x = left; x < right; x++) {
                 if (b->pshift) {
                     coeff_unpack_arith_10(c, qfactor, qoffset, b, (int32_t*)(buf)+x, x, y);
@@ -550,8 +547,6 @@ static inline int codeblock(DiracContext *s, SubBand *b,
         }
     } else {
         for (y = top; y < bottom; y++) {
-            if (get_bits_left(gb) < 1)
-                return AVERROR_INVALIDDATA;
             for (x = left; x < right; x++) {
                 int val = coeff_unpack_golomb(gb, qfactor, qoffset);
                 if (b->pshift) {
@@ -563,7 +558,6 @@ static inline int codeblock(DiracContext *s, SubBand *b,
             buf += b->stride;
          }
      }
-     return 0;
 }
 
 /**
@@ -598,7 +592,7 @@ INTRA_DC_PRED(10, uint32_t)
  * Dirac Specification ->
  * 13.4.2 Non-skipped subbands.  subband_coeffs()
  */
-static av_always_inline int decode_subband_internal(DiracContext *s, SubBand *b, int is_arith)
+static av_always_inline void decode_subband_internal(DiracContext *s, SubBand *b, int is_arith)
 {
     int cb_x, cb_y, left, right, top, bottom;
     DiracArith c;
@@ -606,10 +600,9 @@ static av_always_inline int decode_subband_internal(DiracContext *s, SubBand *b,
     int cb_width  = s->codeblock[b->level + (b->orientation != subband_ll)].width;
     int cb_height = s->codeblock[b->level + (b->orientation != subband_ll)].height;
     int blockcnt_one = (cb_width + cb_height) == 2;
-    int ret;
 
     if (!b->length)
-        return 0;
+        return;
 
     init_get_bits8(&gb, b->coeff_data, b->length);
 
@@ -622,9 +615,7 @@ static av_always_inline int decode_subband_internal(DiracContext *s, SubBand *b,
         left = 0;
         for (cb_x = 0; cb_x < cb_width; cb_x++) {
             right = (b->width * (cb_x+1LL)) / cb_width;
-            ret = codeblock(s, b, &gb, &c, left, right, top, bottom, blockcnt_one, is_arith);
-            if (ret < 0)
-                return ret;
+            codeblock(s, b, &gb, &c, left, right, top, bottom, blockcnt_one, is_arith);
             left = right;
         }
         top = bottom;
@@ -637,35 +628,33 @@ static av_always_inline int decode_subband_internal(DiracContext *s, SubBand *b,
             intra_dc_prediction_8(b);
         }
     }
-    return 0;
 }
 
 static int decode_subband_arith(AVCodecContext *avctx, void *b)
 {
     DiracContext *s = avctx->priv_data;
-    return decode_subband_internal(s, b, 1);
+    decode_subband_internal(s, b, 1);
+    return 0;
 }
 
 static int decode_subband_golomb(AVCodecContext *avctx, void *arg)
 {
     DiracContext *s = avctx->priv_data;
     SubBand **b     = arg;
-    return decode_subband_internal(s, *b, 0);
+    decode_subband_internal(s, *b, 0);
+    return 0;
 }
 
 /**
  * Dirac Specification ->
  * [DIRAC_STD] 13.4.1 core_transform_data()
  */
-static int decode_component(DiracContext *s, int comp)
+static void decode_component(DiracContext *s, int comp)
 {
     AVCodecContext *avctx = s->avctx;
     SubBand *bands[3*MAX_DWT_LEVELS+1];
     enum dirac_subband orientation;
     int level, num_bands = 0;
-    int ret[3*MAX_DWT_LEVELS+1];
-    int i;
-    int damaged_count = 0;
 
     /* Unpack all subbands at all levels. */
     for (level = 0; level < s->wavelet_depth; level++) {
@@ -681,34 +670,21 @@ static int decode_component(DiracContext *s, int comp)
                 if (b->quant > (DIRAC_MAX_QUANT_INDEX - 1)) {
                     av_log(s->avctx, AV_LOG_ERROR, "Unsupported quant %d\n", b->quant);
                     b->quant = 0;
-                    return AVERROR_INVALIDDATA;
                 }
                 align_get_bits(&s->gb);
                 b->coeff_data = s->gb.buffer + get_bits_count(&s->gb)/8;
-                if (b->length > FFMAX(get_bits_left(&s->gb)/8, 0)) {
-                    b->length = FFMAX(get_bits_left(&s->gb)/8, 0);
-                    damaged_count ++;
-                }
+                b->length = FFMIN(b->length, FFMAX(get_bits_left(&s->gb)/8, 0));
                 skip_bits_long(&s->gb, b->length*8);
             }
         }
         /* arithmetic coding has inter-level dependencies, so we can only execute one level at a time */
         if (s->is_arith)
             avctx->execute(avctx, decode_subband_arith, &s->plane[comp].band[level][!!level],
-                           ret + 3*level + !!level, 4-!!level, sizeof(SubBand));
+                           NULL, 4-!!level, sizeof(SubBand));
     }
     /* golomb coding has no inter-level dependencies, so we can execute all subbands in parallel */
     if (!s->is_arith)
-        avctx->execute(avctx, decode_subband_golomb, bands, ret, num_bands, sizeof(SubBand*));
-
-    for (i = 0; i < s->wavelet_depth * 3 + 1; i++) {
-        if (ret[i] < 0)
-            damaged_count++;
-    }
-    if (damaged_count > (s->wavelet_depth * 3 + 1) /2)
-        return AVERROR_INVALIDDATA;
-
-    return 0;
+        avctx->execute(avctx, decode_subband_golomb, bands, NULL, num_bands, sizeof(SubBand*));
 }
 
 #define PARSE_VALUES(type, x, gb, ebits, buf1, buf2) \
@@ -1553,11 +1529,6 @@ static int dirac_unpack_block_motion_data(DiracContext *s)
                 }
         }
 
-    for (i = 0; i < 4 + 2*s->num_refs; i++) {
-        if (arith[i].error)
-            return arith[i].error;
-    }
-
     return 0;
 }
 
@@ -1901,9 +1872,7 @@ static int dirac_decode_frame_internal(DiracContext *s)
         if (!s->zero_res && !s->low_delay)
         {
             memset(p->idwt.buf, 0, p->idwt.stride * p->idwt.height);
-            ret = decode_component(s, comp); /* [DIRAC_STD] 13.4.1 core_transform_data() */
-            if (ret < 0)
-                return ret;
+            decode_component(s, comp); /* [DIRAC_STD] 13.4.1 core_transform_data() */
         }
         ret = ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx+2,
                                    s->wavelet_depth, s->bit_depth);
@@ -1971,10 +1940,7 @@ static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
 {
     int ret, i;
     int chroma_x_shift, chroma_y_shift;
-    ret = av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt, &chroma_x_shift,
-                                           &chroma_y_shift);
-    if (ret < 0)
-        return ret;
+    avcodec_get_chroma_sub_sample(avctx->pix_fmt, &chroma_x_shift, &chroma_y_shift);
 
     f->width  = avctx->width  + 2 * EDGE_WIDTH;
     f->height = avctx->height + 2 * EDGE_WIDTH + 2;
@@ -2147,7 +2113,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
             return ret;
         }
 
-        if (CALC_PADDING((int64_t)dsh->width, MAX_DWT_LEVELS) * CALC_PADDING((int64_t)dsh->height, MAX_DWT_LEVELS) * 5LL > avctx->max_pixels)
+        if (CALC_PADDING((int64_t)dsh->width, MAX_DWT_LEVELS) * CALC_PADDING((int64_t)dsh->height, MAX_DWT_LEVELS) > avctx->max_pixels)
             ret = AVERROR(ERANGE);
         if (ret >= 0)
             ret = ff_set_dimensions(avctx, dsh->width, dsh->height);
@@ -2173,11 +2139,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
 
         s->pshift = s->bit_depth > 8;
 
-        ret = av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt,
-                                               &s->chroma_x_shift,
-                                               &s->chroma_y_shift);
-        if (ret < 0)
-            return ret;
+        avcodec_get_chroma_sub_sample(avctx->pix_fmt, &s->chroma_x_shift, &s->chroma_y_shift);
 
         ret = alloc_sequence_buffers(s);
         if (ret < 0)

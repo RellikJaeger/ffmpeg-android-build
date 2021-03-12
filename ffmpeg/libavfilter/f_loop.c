@@ -25,7 +25,6 @@
 #include "libavutil/opt.h"
 #include "avfilter.h"
 #include "audio.h"
-#include "filters.h"
 #include "formats.h"
 #include "internal.h"
 #include "video.h"
@@ -45,7 +44,6 @@ typedef struct LoopContext {
     int64_t ignored_samples;
 
     int loop;
-    int eof;
     int64_t size;
     int64_t start;
     int64_t pts;
@@ -54,15 +52,6 @@ typedef struct LoopContext {
 #define AFLAGS AV_OPT_FLAG_AUDIO_PARAM|AV_OPT_FLAG_FILTERING_PARAM
 #define VFLAGS AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_FILTERING_PARAM
 #define OFFSET(x) offsetof(LoopContext, x)
-
-static void check_size(AVFilterContext *ctx)
-{
-    LoopContext *s = ctx->priv;
-
-    if (!s->size)
-        av_log(ctx, AV_LOG_WARNING, "Number of %s to loop is not set!\n",
-               ctx->input_pads[0].type == AVMEDIA_TYPE_VIDEO ? "frames" : "samples");
-}
 
 #if CONFIG_ALOOP_FILTER
 
@@ -75,8 +64,6 @@ static int aconfig_input(AVFilterLink *inlink)
     s->left = av_audio_fifo_alloc(inlink->format, inlink->channels, 8192);
     if (!s->fifo || !s->left)
         return AVERROR(ENOMEM);
-
-    check_size(ctx);
 
     return 0;
 }
@@ -261,8 +248,6 @@ static av_cold int init(AVFilterContext *ctx)
     if (!s->frames)
         return AVERROR(ENOMEM);
 
-    check_size(ctx);
-
     return 0;
 }
 
@@ -282,7 +267,7 @@ static int push_frame(AVFilterContext *ctx)
 {
     AVFilterLink *outlink = ctx->outputs[0];
     LoopContext *s = ctx->priv;
-    int64_t pts, duration;
+    int64_t pts;
     int ret;
 
     AVFrame *out = av_frame_clone(s->frames[s->current_frame]);
@@ -290,11 +275,7 @@ static int push_frame(AVFilterContext *ctx)
     if (!out)
         return AVERROR(ENOMEM);
     out->pts += s->duration - s->start_pts;
-    if (out->pkt_duration)
-        duration = out->pkt_duration;
-    else
-        duration = av_rescale_q(1, av_inv_q(outlink->frame_rate), outlink->time_base);
-    pts = out->pts + duration;
+    pts = out->pts + out->pkt_duration;
     ret = ff_filter_frame(outlink, out);
     s->current_frame++;
 
@@ -314,7 +295,6 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
     AVFilterContext *ctx = inlink->dst;
     AVFilterLink *outlink = ctx->outputs[0];
     LoopContext *s = ctx->priv;
-    int64_t duration;
     int ret = 0;
 
     if (inlink->frame_count_out >= s->start && s->size > 0 && s->loop != 0) {
@@ -327,11 +307,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
                 return AVERROR(ENOMEM);
             }
             s->nb_frames++;
-            if (frame->pkt_duration)
-                duration = frame->pkt_duration;
-            else
-                duration = av_rescale_q(1, av_inv_q(outlink->frame_rate), outlink->time_base);
-            s->duration = frame->pts + duration;
+            s->duration = frame->pts + frame->pkt_duration;
             ret = ff_filter_frame(outlink, frame);
         } else {
             av_frame_free(&frame);
@@ -345,46 +321,25 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
     return ret;
 }
 
-static int activate(AVFilterContext *ctx)
+static int request_frame(AVFilterLink *outlink)
 {
-    AVFilterLink *inlink = ctx->inputs[0];
-    AVFilterLink *outlink = ctx->outputs[0];
+    AVFilterContext *ctx = outlink->src;
     LoopContext *s = ctx->priv;
-    AVFrame *frame = NULL;
-    int ret, status;
-    int64_t pts;
+    int ret = 0;
 
-    FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
-
-    if (!s->eof && (s->nb_frames < s->size || !s->loop || !s->size)) {
-        ret = ff_inlink_consume_frame(inlink, &frame);
-        if (ret < 0)
-            return ret;
-        if (ret > 0)
-            return filter_frame(inlink, frame);
-    }
-
-    if (!s->eof && ff_inlink_acknowledge_status(inlink, &status, &pts)) {
-        if (status == AVERROR_EOF) {
-            s->size = s->nb_frames;
-            s->eof = 1;
-        }
-    }
-
-    if (s->eof && (!s->loop || !s->size)) {
-        ff_outlink_set_status(outlink, AVERROR_EOF, s->duration);
-        return 0;
-    }
-
-    if (!s->eof && (!s->size ||
+    if ((!s->size) ||
         (s->nb_frames < s->size) ||
-        (s->nb_frames >= s->size && s->loop == 0))) {
-        FF_FILTER_FORWARD_WANTED(outlink, inlink);
-    } else if (s->loop && s->nb_frames == s->size) {
-        return push_frame(ctx);
+        (s->nb_frames >= s->size && s->loop == 0)) {
+        ret = ff_request_frame(ctx->inputs[0]);
+    } else {
+        ret = push_frame(ctx);
     }
 
-    return FFERROR_NOT_READY;
+    if (ret == AVERROR_EOF && s->nb_frames > 0 && s->loop != 0) {
+        ret = push_frame(ctx);
+    }
+
+    return ret;
 }
 
 static const AVOption loop_options[] = {
@@ -398,16 +353,18 @@ AVFILTER_DEFINE_CLASS(loop);
 
 static const AVFilterPad inputs[] = {
     {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
+        .name         = "default",
+        .type         = AVMEDIA_TYPE_VIDEO,
+        .filter_frame = filter_frame,
     },
     { NULL }
 };
 
 static const AVFilterPad outputs[] = {
     {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
+        .name          = "default",
+        .type          = AVMEDIA_TYPE_VIDEO,
+        .request_frame = request_frame,
     },
     { NULL }
 };
@@ -419,7 +376,6 @@ AVFilter ff_vf_loop = {
     .priv_class  = &loop_class,
     .init        = init,
     .uninit      = uninit,
-    .activate    = activate,
     .inputs      = inputs,
     .outputs     = outputs,
 };

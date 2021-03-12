@@ -52,8 +52,8 @@ typedef struct WebMChunkContext {
     int chunk_index;
     char *http_method;
     uint64_t duration_written;
-    int64_t prev_pts;
-    ff_const59 AVOutputFormat *oformat;
+    int prev_pts;
+    AVOutputFormat *oformat;
     AVFormatContext *avf;
 } WebMChunkContext;
 
@@ -104,8 +104,8 @@ static int get_chunk_filename(AVFormatContext *s, int is_header, char filename[M
         }
     } else {
         if (av_get_frame_filename(filename, MAX_FILENAME_SIZE,
-                                  s->url, wc->chunk_index - 1) < 0) {
-            av_log(oc, AV_LOG_ERROR, "Invalid chunk filename template '%s'\n", s->url);
+                                  s->filename, wc->chunk_index - 1) < 0) {
+            av_log(oc, AV_LOG_ERROR, "Invalid chunk filename template '%s'\n", s->filename);
             return AVERROR(EINVAL);
         }
     }
@@ -119,41 +119,34 @@ static int webm_chunk_write_header(AVFormatContext *s)
     int ret;
     int i;
     AVDictionary *options = NULL;
-    char oc_filename[MAX_FILENAME_SIZE];
-    char *oc_url;
 
     // DASH Streams can only have either one track per file.
     if (s->nb_streams != 1) { return AVERROR_INVALIDDATA; }
 
     wc->chunk_index = wc->chunk_start_index;
-    wc->oformat = av_guess_format("webm", s->url, "video/webm");
+    wc->oformat = av_guess_format("webm", s->filename, "video/webm");
     if (!wc->oformat)
         return AVERROR_MUXER_NOT_FOUND;
-    wc->prev_pts = AV_NOPTS_VALUE;
 
     ret = chunk_mux_init(s);
     if (ret < 0)
         return ret;
     oc = wc->avf;
-    ret = get_chunk_filename(s, 1, oc_filename);
+    ret = get_chunk_filename(s, 1, oc->filename);
     if (ret < 0)
         return ret;
-    oc_url = av_strdup(oc_filename);
-    if (!oc_url)
-        return AVERROR(ENOMEM);
-    ff_format_set_url(oc, oc_url);
     if (wc->http_method)
         av_dict_set(&options, "method", wc->http_method, 0);
-    ret = s->io_open(s, &oc->pb, oc->url, AVIO_FLAG_WRITE, &options);
+    ret = s->io_open(s, &oc->pb, oc->filename, AVIO_FLAG_WRITE, &options);
     av_dict_free(&options);
     if (ret < 0)
         return ret;
 
     oc->pb->seekable = 0;
     ret = oc->oformat->write_header(oc);
-    ff_format_io_close(s, &oc->pb);
     if (ret < 0)
         return ret;
+    ff_format_io_close(s, &oc->pb);
     for (i = 0; i < s->nb_streams; i++) {
         // ms precision is the de-facto standard timescale for mkv files.
         avpriv_set_pts_info(s->streams[i], 64, 1, 1000);
@@ -217,10 +210,9 @@ static int webm_chunk_write_packet(AVFormatContext *s, AVPacket *pkt)
     int ret;
 
     if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-        if (wc->prev_pts != AV_NOPTS_VALUE)
-            wc->duration_written += av_rescale_q(pkt->pts - wc->prev_pts,
-                                                 st->time_base,
-                                                 (AVRational) {1, 1000});
+        wc->duration_written += av_rescale_q(pkt->pts - wc->prev_pts,
+                                             st->time_base,
+                                             (AVRational) {1, 1000});
         wc->prev_pts = pkt->pts;
     }
 

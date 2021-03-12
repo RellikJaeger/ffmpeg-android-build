@@ -164,14 +164,6 @@ av_cold int swr_init(struct SwrContext *s){
         return AVERROR(EINVAL);
     }
 
-    if(s-> in_sample_rate <= 0){
-        av_log(s, AV_LOG_ERROR, "Requested input sample rate %d is invalid\n", s->in_sample_rate);
-        return AVERROR(EINVAL);
-    }
-    if(s->out_sample_rate <= 0){
-        av_log(s, AV_LOG_ERROR, "Requested output sample rate %d is invalid\n", s->out_sample_rate);
-        return AVERROR(EINVAL);
-    }
     s->out.ch_count  = s-> user_out_ch_count;
     s-> in.ch_count  = s->  user_in_ch_count;
     s->used_ch_count = s->user_used_ch_count;
@@ -248,7 +240,7 @@ av_cold int swr_init(struct SwrContext *s){
         &&s->int_sample_fmt != AV_SAMPLE_FMT_S64P
         &&s->int_sample_fmt != AV_SAMPLE_FMT_FLTP
         &&s->int_sample_fmt != AV_SAMPLE_FMT_DBLP){
-        av_log(s, AV_LOG_ERROR, "Requested sample format %s is not supported internally, s16p/s32p/s64p/fltp/dblp are supported\n", av_get_sample_fmt_name(s->int_sample_fmt));
+        av_log(s, AV_LOG_ERROR, "Requested sample format %s is not supported internally, S16/S32/S64/FLT/DBL is supported\n", av_get_sample_fmt_name(s->int_sample_fmt));
         return AVERROR(EINVAL);
     }
 
@@ -284,7 +276,7 @@ av_cold int swr_init(struct SwrContext *s){
         && s->int_sample_fmt != AV_SAMPLE_FMT_FLTP
         && s->int_sample_fmt != AV_SAMPLE_FMT_DBLP
         && s->resample){
-        av_log(s, AV_LOG_ERROR, "Resampling only supported with internal s16p/s32p/fltp/dblp\n");
+        av_log(s, AV_LOG_ERROR, "Resampling only supported with internal s16/s32/flt/dbl\n");
         ret = AVERROR(EINVAL);
         goto fail;
     }

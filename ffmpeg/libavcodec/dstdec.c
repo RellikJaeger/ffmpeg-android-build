@@ -70,7 +70,7 @@ typedef struct DSTContext {
     GetBitContext gb;
     ArithCoder ac;
     Table fsets, probs;
-    DECLARE_ALIGNED(16, uint8_t, status)[DST_MAX_CHANNELS][16];
+    DECLARE_ALIGNED(64, uint8_t, status)[DST_MAX_CHANNELS][16];
     DECLARE_ALIGNED(16, int16_t, filter)[DST_MAX_ELEMENTS][16][256];
     DSDContext dsdctx[DST_MAX_CHANNELS];
 } DSTContext;
@@ -84,6 +84,12 @@ static av_cold int decode_init(AVCodecContext *avctx)
         avpriv_request_sample(avctx, "Channel count %d", avctx->channels);
         return AVERROR_PATCHWELCOME;
     }
+
+    // the sample rate is only allowed to be 64,128,256 * 44100 by ISO/IEC 14496-3:2005(E)
+    // We are a bit more tolerant here, but this check is needed to bound the size and duration
+    if (avctx->sample_rate > 512 * 44100)
+        return AVERROR_INVALIDDATA;
+
 
     if (DST_SAMPLES_PER_FRAME(avctx->sample_rate) & 7) {
         return AVERROR_PATCHWELCOME;
@@ -355,8 +361,8 @@ static int decode_frame(AVCodecContext *avctx, void *data,
             v = ((predict >> 15) ^ residual) & 1;
             dsd[((i >> 3) * channels + ch) << 2] |= v << (7 - (i & 0x7 ));
 
-            AV_WL64A(status + 8, (AV_RL64A(status + 8) << 1) | ((AV_RL64A(status) >> 63) & 1));
-            AV_WL64A(status, (AV_RL64A(status) << 1) | v);
+            AV_WN64A(status + 8, (AV_RN64A(status + 8) << 1) | ((AV_RN64A(status) >> 63) & 1));
+            AV_WN64A(status, (AV_RN64A(status) << 1) | v);
         }
     }
 

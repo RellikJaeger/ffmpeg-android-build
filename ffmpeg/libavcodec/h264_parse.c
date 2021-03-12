@@ -120,7 +120,7 @@ int ff_h264_pred_weight_table(GetBitContext *gb, const SPS *sps,
     pwt->use_weight = pwt->use_weight || pwt->use_weight_chroma;
     return 0;
 out_range_weight:
-    avpriv_request_sample(logctx, "Out of range weight");
+    avpriv_request_sample(logctx, "Out of range weight\n");
     return AVERROR_INVALIDDATA;
 }
 
@@ -242,23 +242,18 @@ int ff_h264_parse_ref_count(int *plist_count, int ref_count[2],
                 ref_count[1] = 1;
         }
 
-        if (slice_type_nos == AV_PICTURE_TYPE_B)
-            list_count = 2;
-        else
-            list_count = 1;
-
-        if (ref_count[0] - 1 > max[0] || (list_count == 2 && (ref_count[1] - 1 > max[1]))) {
+        if (ref_count[0] - 1 > max[0] || ref_count[1] - 1 > max[1]) {
             av_log(logctx, AV_LOG_ERROR, "reference overflow %u > %u or %u > %u\n",
                    ref_count[0] - 1, max[0], ref_count[1] - 1, max[1]);
             ref_count[0] = ref_count[1] = 0;
             *plist_count = 0;
             goto fail;
-        } else if (ref_count[1] - 1 > max[1]) {
-            av_log(logctx, AV_LOG_DEBUG, "reference overflow %u > %u \n",
-                   ref_count[1] - 1, max[1]);
-            ref_count[1] = 0;
         }
 
+        if (slice_type_nos == AV_PICTURE_TYPE_B)
+            list_count = 2;
+        else
+            list_count = 1;
     } else {
         list_count   = 0;
         ref_count[0] = ref_count[1] = 0;
@@ -279,7 +274,7 @@ int ff_h264_init_poc(int pic_field_poc[2], int *pic_poc,
                      int picture_structure, int nal_ref_idc)
 {
     const int max_frame_num = 1 << sps->log2_max_frame_num;
-    int64_t field_poc[2];
+    int field_poc[2];
 
     pc->frame_num_offset = pc->prev_frame_num_offset;
     if (pc->frame_num < pc->prev_frame_num)
@@ -346,10 +341,6 @@ int ff_h264_init_poc(int pic_field_poc[2], int *pic_poc,
         field_poc[1] = poc;
     }
 
-    if (   field_poc[0] != (int)field_poc[0]
-        || field_poc[1] != (int)field_poc[1])
-        return AVERROR_INVALIDDATA;
-
     if (picture_structure != PICT_BOTTOM_FIELD)
         pic_field_poc[0] = field_poc[0];
     if (picture_structure != PICT_TOP_FIELD)
@@ -365,7 +356,7 @@ static int decode_extradata_ps(const uint8_t *data, int size, H264ParamSets *ps,
     H2645Packet pkt = { 0 };
     int i, ret = 0;
 
-    ret = ff_h2645_packet_split(&pkt, data, size, logctx, is_avc, 2, AV_CODEC_ID_H264, 1, 0);
+    ret = ff_h2645_packet_split(&pkt, data, size, logctx, is_avc, 2, AV_CODEC_ID_H264, 1);
     if (ret < 0) {
         ret = 0;
         goto fail;

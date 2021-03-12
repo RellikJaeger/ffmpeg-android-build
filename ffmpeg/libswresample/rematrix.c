@@ -384,8 +384,8 @@ av_cold static int auto_matrix(SwrContext *s)
 
 av_cold int swri_rematrix_init(SwrContext *s){
     int i, j;
-    int nb_in  = s->used_ch_count;
-    int nb_out = s->out.ch_count;
+    int nb_in  = av_get_channel_layout_nb_channels(s->in_ch_layout);
+    int nb_out = av_get_channel_layout_nb_channels(s->out_ch_layout);
 
     s->mix_any_f = NULL;
 
@@ -447,23 +447,14 @@ av_cold int swri_rematrix_init(SwrContext *s){
         s->mix_2_1_f = (mix_2_1_func_type*)sum2_double;
         s->mix_any_f = (mix_any_func_type*)get_mix_any_func_double(s);
     }else if(s->midbuf.fmt == AV_SAMPLE_FMT_S32P){
+        // Only for dithering currently
+//         s->native_matrix = av_calloc(nb_in * nb_out, sizeof(double));
         s->native_one    = av_mallocz(sizeof(int));
         if (!s->native_one)
             return AVERROR(ENOMEM);
-        s->native_matrix = av_calloc(nb_in * nb_out, sizeof(int));
-        if (!s->native_matrix) {
-            av_freep(&s->native_one);
-            return AVERROR(ENOMEM);
-        }
-        for (i = 0; i < nb_out; i++) {
-            double rem = 0;
-
-            for (j = 0; j < nb_in; j++) {
-                double target = s->matrix[i][j] * 32768 + rem;
-                ((int*)s->native_matrix)[i * nb_in + j] = lrintf(target);
-                rem += target - ((int*)s->native_matrix)[i * nb_in + j];
-            }
-        }
+//         for (i = 0; i < nb_out; i++)
+//             for (j = 0; j < nb_in; j++)
+//                 ((double*)s->native_matrix)[i * nb_in + j] = s->matrix[i][j];
         *((int*)s->native_one) = 32768;
         s->mix_1_1_f = (mix_1_1_func_type*)copy_s32;
         s->mix_2_1_f = (mix_2_1_func_type*)sum2_s32;
