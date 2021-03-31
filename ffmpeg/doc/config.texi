@@ -1408,7 +1408,7 @@
 @c @set config-vplayer-demuxer no
 @c @set config-vqf-demuxer no
 @c @set config-w64-demuxer no
-@c @set config-wav-demuxer no
+@set config-wav-demuxer yes
 @c @set config-wc3-demuxer no
 @c @set config-webm-dash-manifest-demuxer no
 @c @set config-webvtt-demuxer no
@@ -1694,7 +1694,7 @@
 @c @set config-asplit-filter no
 @c @set config-astats-filter no
 @c @set config-astreamselect-filter no
-@c @set config-atempo-filter no
+@set config-atempo-filter yes
 @set config-atrim-filter yes
 @c @set config-azmq-filter no
 @c @set config-bandpass-filter no

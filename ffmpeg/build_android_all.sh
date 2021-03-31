@@ -24,6 +24,7 @@ export COMMON_SET="--enable-static \
   --enable-demuxer=mp3 \
   --enable-demuxer=image2 \
   --enable-demuxer=gif \
+  --enable-demuxer=wav \
   --disable-decoders \
   --enable-decoder=aac \
   --enable-decoder=png \
@@ -50,6 +51,7 @@ export COMMON_SET="--enable-static \
   --enable-filter=crop \
   --enable-filter=scale \
   --enable-filter=afade \
+  --enable-filter=atempo \
   --enable-filter=copy \
   --enable-filter=aformat \
   --enable-filter=overlay \
