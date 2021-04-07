@@ -1034,7 +1034,7 @@
 @c @set config-pcm-s8-planar-decoder no
 @c @set config-pcm-s16be-decoder no
 @c @set config-pcm-s16be-planar-decoder no
-@c @set config-pcm-s16le-decoder no
+@set config-pcm-s16le-decoder yes
 @c @set config-pcm-s16le-planar-decoder no
 @c @set config-pcm-s24be-decoder no
 @c @set config-pcm-s24daud-decoder no
