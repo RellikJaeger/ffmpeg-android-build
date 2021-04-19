@@ -34,6 +34,7 @@ export COMMON_SET="--enable-static \
   --enable-decoder=mpeg4 \
   --enable-decoder=gif \
   --enable-decoder=pcm_s16le \
+  --enable-decoder=hevc \
   --disable-muxers \
   --enable-muxer=mov \
   --enable-muxer=mp4 \

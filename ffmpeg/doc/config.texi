@@ -573,7 +573,7 @@
 @set config-audio-frame-queue yes
 @c @set config-audiodsp no
 @set config-blockdsp yes
-@c @set config-bswapdsp no
+@set config-bswapdsp yes
 @set config-cabac yes
 @c @set config-dirac-parse no
 @c @set config-dvprofile no
@@ -754,7 +754,7 @@
 @c @set config-h264-vda-decoder no
 @c @set config-h264-vdpau-decoder no
 @c @set config-hap-decoder no
-@c @set config-hevc-decoder no
+@set config-hevc-decoder yes
 @c @set config-hevc-qsv-decoder no
 @c @set config-hevc-rkmpp-decoder no
 @c @set config-hevc-v4l2m2m-decoder no
