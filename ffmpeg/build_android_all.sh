@@ -27,6 +27,7 @@ export COMMON_SET="--enable-static \
   --enable-demuxer=wav \
   --enable-demuxer=asf \
   --enable-demuxer=flv \
+  --enable-demuxer=avi \
   --disable-decoders \
   --enable-decoder=aac \
   --enable-decoder=png \
@@ -44,6 +45,7 @@ export COMMON_SET="--enable-static \
   --enable-decoder=wmav2 \
   --enable-decoder=flv \
   --enable-decoder=adpcm_swf \
+  --enable-decoder=ac3 \
   --disable-muxers \
   --enable-muxer=mov \
   --enable-muxer=mp4 \

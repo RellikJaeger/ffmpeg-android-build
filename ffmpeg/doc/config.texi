@@ -569,7 +569,7 @@
 @set config-muxers yes
 @set config-protocols yes
 @set config-aandcttables yes
-@c @set config-ac3dsp no
+@set config-ac3dsp yes
 @set config-audio-frame-queue yes
 @c @set config-audiodsp no
 @set config-blockdsp yes
@@ -582,7 +582,7 @@
 @set config-faanidct yes
 @set config-fdctdsp yes
 @c @set config-flacdsp no
-@c @set config-fmtconvert no
+@set config-fmtconvert yes
 @set config-frame-thread-encoder yes
 @c @set config-g722dsp no
 @set config-golomb yes
@@ -937,7 +937,7 @@
 @set config-aac-decoder yes
 @c @set config-aac-fixed-decoder no
 @c @set config-aac-latm-decoder no
-@c @set config-ac3-decoder no
+@set config-ac3-decoder yes
 @c @set config-ac3-fixed-decoder no
 @c @set config-alac-decoder no
 @c @set config-als-decoder no
@@ -1193,7 +1193,7 @@
 @c @set config-ass-demuxer no
 @c @set config-ast-demuxer no
 @c @set config-au-demuxer no
-@c @set config-avi-demuxer no
+@set config-avi-demuxer yes
 @c @set config-avisynth-demuxer no
 @c @set config-avr-demuxer no
 @c @set config-avs-demuxer no
@@ -2253,7 +2253,7 @@
 @c @set config-xv-outdev no
 @c @set config-aac-parser no
 @c @set config-aac-latm-parser no
-@c @set config-ac3-parser no
+@set config-ac3-parser yes
 @c @set config-adx-parser no
 @c @set config-bmp-parser no
 @c @set config-cavsvideo-parser no
