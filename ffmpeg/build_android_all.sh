@@ -46,6 +46,7 @@ export COMMON_SET="--enable-static \
   --enable-encoder=aac \
   --enable-encoder=libx264 \
   --enable-encoder=png \
+  --enable-encoder=libmp3lame \
   --enable-encoder=mjpeg \
   --enable-encoder=gif \
   --enable-swscale \
@@ -81,7 +82,9 @@ export COMMON_SET="--enable-static \
   --enable-gpl \
   --enable-zlib \
   --enable-libx264 \
+  --enable-libmp3lame \
   --enable-jni \
+  --enable-nonfree \
   --enable-mediacodec \
   --enable-decoder=h264_mediacodec \
   --enable-decoder=mpeg4_mediacodec \

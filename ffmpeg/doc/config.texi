@@ -458,7 +458,7 @@
 @c @set config-libilbc no
 @c @set config-libkvazaar no
 @c @set config-libmodplug no
-@c @set config-libmp3lame no
+@set config-libmp3lame yes
 @c @set config-libmysofa no
 @c @set config-libopencv no
 @c @set config-libopenh264 no
@@ -520,7 +520,7 @@
 @set config-static yes
 @set config-swscale-alpha yes
 @set config-gpl yes
-@c @set config-nonfree no
+@set config-nonfree yes
 @set config-version3 yes
 @set config-avcodec yes
 @c @set config-avdevice no
@@ -1609,7 +1609,7 @@
 @c @set config-libgsm-encoder no
 @c @set config-libgsm-ms-encoder no
 @c @set config-libilbc-encoder no
-@c @set config-libmp3lame-encoder no
+@set config-libmp3lame-encoder yes
 @c @set config-libopencore-amrnb-encoder no
 @c @set config-libopenjpeg-encoder no
 @c @set config-libopus-encoder no
