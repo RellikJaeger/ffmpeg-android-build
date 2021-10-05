@@ -731,7 +731,7 @@
 @c @set config-flashsv-decoder no
 @c @set config-flashsv2-decoder no
 @c @set config-flic-decoder no
-@c @set config-flv-decoder no
+@set config-flv-decoder yes
 @c @set config-fmvc-decoder no
 @c @set config-fourxm-decoder no
 @c @set config-fraps-decoder no
@@ -1093,7 +1093,7 @@
 @c @set config-adpcm-sbpro-2-decoder no
 @c @set config-adpcm-sbpro-3-decoder no
 @c @set config-adpcm-sbpro-4-decoder no
-@c @set config-adpcm-swf-decoder no
+@set config-adpcm-swf-decoder yes
 @c @set config-adpcm-thp-decoder no
 @c @set config-adpcm-thp-le-decoder no
 @c @set config-adpcm-vima-decoder no
@@ -1239,7 +1239,7 @@
 @c @set config-fits-demuxer no
 @c @set config-flac-demuxer no
 @c @set config-flic-demuxer no
-@c @set config-flv-demuxer no
+@set config-flv-demuxer yes
 @c @set config-live-flv-demuxer no
 @c @set config-fourxm-demuxer no
 @c @set config-frm-demuxer no
