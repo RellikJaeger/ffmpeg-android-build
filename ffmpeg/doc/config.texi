@@ -542,7 +542,7 @@
 @set config-fast-unaligned yes
 @set config-fft yes
 @c @set config-lsp no
-@c @set config-lzo no
+@set config-lzo yes
 @set config-mdct yes
 @c @set config-pixelutils no
 @set config-network yes
@@ -644,7 +644,7 @@
 @set config-videodsp yes
 @c @set config-vp3dsp no
 @c @set config-vp56dsp no
-@c @set config-vp8dsp no
+@set config-vp8dsp yes
 @set config-wma-freqs yes
 @c @set config-wmv2dsp no
 @c @set config-aac-adtstoasc-bsf no
@@ -902,7 +902,7 @@
 @c @set config-vp6a-decoder no
 @c @set config-vp6f-decoder no
 @c @set config-vp7-decoder no
-@c @set config-vp8-decoder no
+@set config-vp8-decoder yes
 @c @set config-vp8-rkmpp-decoder no
 @c @set config-vp8-v4l2m2m-decoder no
 @c @set config-vp9-decoder no
@@ -1009,7 +1009,7 @@
 @c @set config-tta-decoder no
 @c @set config-twinvq-decoder no
 @c @set config-vmdaudio-decoder no
-@c @set config-vorbis-decoder no
+@set config-vorbis-decoder yes
 @c @set config-wavpack-decoder no
 @c @set config-wmalossless-decoder no
 @c @set config-wmapro-decoder no
@@ -1284,7 +1284,7 @@
 @c @set config-lvf-demuxer no
 @c @set config-lxf-demuxer no
 @c @set config-m4v-demuxer no
-@c @set config-matroska-demuxer no
+@set config-matroska-demuxer yes
 @c @set config-mgsts-demuxer no
 @c @set config-microdvd-demuxer no
 @c @set config-mjpeg-demuxer no
@@ -1410,7 +1410,7 @@
 @c @set config-w64-demuxer no
 @set config-wav-demuxer yes
 @c @set config-wc3-demuxer no
-@c @set config-webm-dash-manifest-demuxer no
+@set config-webm-dash-manifest-demuxer yes
 @c @set config-webvtt-demuxer no
 @c @set config-wsaud-demuxer no
 @c @set config-wsd-demuxer no

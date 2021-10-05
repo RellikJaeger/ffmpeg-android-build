@@ -28,6 +28,7 @@ export COMMON_SET="--enable-static \
   --enable-demuxer=asf \
   --enable-demuxer=flv \
   --enable-demuxer=avi \
+  --enable-demuxer=webm_dash_manifest \
   --disable-decoders \
   --enable-decoder=aac \
   --enable-decoder=png \
@@ -46,6 +47,8 @@ export COMMON_SET="--enable-static \
   --enable-decoder=flv \
   --enable-decoder=adpcm_swf \
   --enable-decoder=ac3 \
+  --enable-decoder=vp8 \
+  --enable-decoder=vorbis \
   --disable-muxers \
   --enable-muxer=mov \
   --enable-muxer=mp4 \
