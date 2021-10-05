@@ -645,7 +645,7 @@
 @c @set config-vp3dsp no
 @c @set config-vp56dsp no
 @c @set config-vp8dsp no
-@c @set config-wma-freqs no
+@set config-wma-freqs yes
 @c @set config-wmv2dsp no
 @c @set config-aac-adtstoasc-bsf no
 @c @set config-chomp-bsf no
@@ -803,9 +803,9 @@
 @c @set config-mpeg2-mediacodec-decoder no
 @c @set config-msa1-decoder no
 @c @set config-mscc-decoder no
-@c @set config-msmpeg4v1-decoder no
-@c @set config-msmpeg4v2-decoder no
-@c @set config-msmpeg4v3-decoder no
+@set config-msmpeg4v1-decoder yes
+@set config-msmpeg4v2-decoder yes
+@set config-msmpeg4v3-decoder yes
 @c @set config-msmpeg4-crystalhd-decoder no
 @c @set config-msrle-decoder no
 @c @set config-mss1-decoder no
@@ -1013,8 +1013,8 @@
 @c @set config-wavpack-decoder no
 @c @set config-wmalossless-decoder no
 @c @set config-wmapro-decoder no
-@c @set config-wmav1-decoder no
-@c @set config-wmav2-decoder no
+@set config-wmav1-decoder yes
+@set config-wmav2-decoder yes
 @c @set config-wmavoice-decoder no
 @c @set config-ws-snd1-decoder no
 @c @set config-xma1-decoder no

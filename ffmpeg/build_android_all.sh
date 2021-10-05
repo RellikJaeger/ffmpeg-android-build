@@ -25,6 +25,7 @@ export COMMON_SET="--enable-static \
   --enable-demuxer=image2 \
   --enable-demuxer=gif \
   --enable-demuxer=wav \
+  --enable-demuxer=asf \
   --disable-decoders \
   --enable-decoder=aac \
   --enable-decoder=png \
@@ -35,6 +36,11 @@ export COMMON_SET="--enable-static \
   --enable-decoder=gif \
   --enable-decoder=pcm_s16le \
   --enable-decoder=hevc \
+  --enable-decoder=msmpeg4v1 \
+  --enable-decoder=msmpeg4v2 \
+  --enable-decoder=msmpeg4v3 \
+  --enable-decoder=wmav1 \
+  --enable-decoder=wmav2 \
   --disable-muxers \
   --enable-muxer=mov \
   --enable-muxer=mp4 \
