@@ -30,6 +30,7 @@ export COMMON_SET="--enable-static \
   --enable-demuxer=avi \
   --enable-demuxer=webm_dash_manifest \
   --enable-demuxer=matroska \
+  --enable-demuxer=mpegts \
   --disable-decoders \
   --enable-decoder=aac \
   --enable-decoder=png \
@@ -50,6 +51,9 @@ export COMMON_SET="--enable-static \
   --enable-decoder=ac3 \
   --enable-decoder=vp8 \
   --enable-decoder=vorbis \
+  --enable-decoder=mpeg2video \
+  --enable-decoder=mp2 \
+  --enable-decoder=indeo4 \
   --disable-muxers \
   --enable-muxer=mov \
   --enable-muxer=mp4 \

@@ -603,7 +603,7 @@
 @set config-mdct15 yes
 @c @set config-intrax8 no
 @set config-iso-media yes
-@c @set config-ividsp no
+@set config-ividsp yes
 @set config-jpegtables yes
 @c @set config-lgplv3 no
 @c @set config-libx262 no
@@ -766,7 +766,7 @@
 @c @set config-iff-ilbm-decoder no
 @c @set config-indeo2-decoder no
 @c @set config-indeo3-decoder no
-@c @set config-indeo4-decoder no
+@set config-indeo4-decoder yes
 @c @set config-indeo5-decoder no
 @c @set config-interplay-video-decoder no
 @c @set config-jpeg2000-decoder no
@@ -786,7 +786,7 @@
 @c @set config-motionpixels-decoder no
 @c @set config-mpeg-xvmc-decoder no
 @c @set config-mpeg1video-decoder no
-@c @set config-mpeg2video-decoder no
+@set config-mpeg2video-decoder yes
 @set config-mpeg4-decoder yes
 @c @set config-mpeg4-crystalhd-decoder no
 @c @set config-mpeg4-v4l2m2m-decoder no
@@ -979,7 +979,7 @@
 @c @set config-mlp-decoder no
 @c @set config-mp1-decoder no
 @c @set config-mp1float-decoder no
-@c @set config-mp2-decoder no
+@set config-mp2-decoder yes
 @c @set config-mp2float-decoder no
 @set config-mp3-decoder yes
 @c @set config-mp3float-decoder no
