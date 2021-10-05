@@ -29,6 +29,7 @@ export COMMON_SET="--enable-static \
   --enable-demuxer=flv \
   --enable-demuxer=avi \
   --enable-demuxer=webm_dash_manifest \
+  --enable-demuxer=matroska \
   --disable-decoders \
   --enable-decoder=aac \
   --enable-decoder=png \
