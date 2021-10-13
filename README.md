@@ -5,7 +5,7 @@
 1. 目前该脚本支持armeabi-v7a arm64-v8a，目前我对FFmpeg裁剪了很多目前编译出来的库4M多，音视频开发常见的功能都包含进去了
 2. ffmpeg 版本3.4.8
 3. x264 版本0.160.x (目前最新)
-4. NDK版本r14b，下载地址：https://developer.android.com/ndk/downloads/older_releases (这个是Google的需要科学上网, 我下载了一份放到了我的服务器上：https://www.bzblog.online/public/android-ndk-r14b-darwin-x86_64.zip)
+4. NDK版本r14b，下载地址：https://developer.android.com/ndk/downloads/older_releases (这个是Google的需要科学上网, 我下载了一份放到了我的服务器上：https://www.raoyunsoft.com/public/android-ndk-r14b-darwin-x86_64.zip)
 5. build目录下是已经编译好的, 如果不能编译就先用着吧
 6. 编译环境Mac 10.15.4（理论上其它环境也可以使用这个脚本编译）
 
