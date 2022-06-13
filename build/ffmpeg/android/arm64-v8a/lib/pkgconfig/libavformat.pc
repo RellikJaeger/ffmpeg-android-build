@@ -9,6 +9,6 @@ Version: 57.83.100
 Requires: libavcodec >= 57.107.100, libavutil >= 55.78.100
 Requires.private: 
 Conflicts:
-Libs: -L${libdir}  -lavformat -lx264 -lm -lz -pthread -pthread -lgcc
+Libs: -L${libdir}  -lavformat -lx264 -lmp3lame -lm -lz -pthread -pthread -lgcc
 Libs.private: 
 Cflags: -I${includedir}

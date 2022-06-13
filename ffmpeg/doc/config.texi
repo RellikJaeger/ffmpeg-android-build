@@ -541,7 +541,7 @@
 @set config-faan yes
 @set config-fast-unaligned yes
 @set config-fft yes
-@c @set config-lsp no
+@set config-lsp yes
 @set config-lzo yes
 @set config-mdct yes
 @c @set config-pixelutils no
@@ -941,7 +941,7 @@
 @c @set config-ac3-fixed-decoder no
 @c @set config-alac-decoder no
 @c @set config-als-decoder no
-@c @set config-amrnb-decoder no
+@set config-amrnb-decoder yes
 @c @set config-amrwb-decoder no
 @c @set config-ape-decoder no
 @c @set config-atrac1-decoder no
