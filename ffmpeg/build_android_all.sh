@@ -54,6 +54,7 @@ export COMMON_SET="--enable-static \
   --enable-decoder=mpeg2video \
   --enable-decoder=mp2 \
   --enable-decoder=indeo4 \
+  --enable-decoder=amrnb \
   --disable-muxers \
   --enable-muxer=mov \
   --enable-muxer=mp4 \
