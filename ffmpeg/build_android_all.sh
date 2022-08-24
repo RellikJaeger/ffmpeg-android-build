@@ -11,11 +11,13 @@ export COMMON_SET="--enable-static \
   --disable-txtpages \
   --disable-ffplay \
   --disable-ffmpeg \
+  --disable-ffserver \
   --disable-ffprobe \
   --disable-avdevice \
   --disable-bsfs \
   --disable-devices \
   --disable-protocols \
+  --disable-postproc \
   --enable-protocol=file \
   --enable-protocol=concat \
   --disable-parsers \
@@ -64,10 +66,10 @@ export COMMON_SET="--enable-static \
   --enable-muxer=gif \
   --disable-encoders \
   --enable-encoder=aac \
-  --enable-encoder=libx264 \
   --enable-encoder=png \
   --enable-encoder=libmp3lame \
   --enable-encoder=mjpeg \
+  --enable-encoder=mpeg4 \
   --enable-encoder=gif \
   --enable-swscale \
   --disable-filters \
@@ -99,19 +101,12 @@ export COMMON_SET="--enable-static \
   --enable-filter=amix \
   --enable-filter=anull \
   --enable-filter=adelay \
-  --enable-gpl \
+  --disable-gpl \
   --enable-zlib \
-  --enable-libx264 \
   --enable-libmp3lame \
   --enable-jni \
   --enable-nonfree \
   --enable-mediacodec \
-  --enable-decoder=h264_mediacodec \
-  --enable-decoder=mpeg4_mediacodec \
-  --enable-decoder=vp9_mediacodec \
-  --enable-decoder=vp8_mediacodec \
-  --enable-decoder=hevc_mediacodec \
-  --enable-hwaccels \
   --enable-asm \
   --enable-version3 "
 

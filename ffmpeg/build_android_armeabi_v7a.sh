@@ -13,8 +13,6 @@ GENERAL="\
 --cc=$PREBUILT/bin/arm-linux-androideabi-gcc \
 --cross-prefix=$PREBUILT/bin/arm-linux-androideabi- \
 --nm=$PREBUILT/bin/arm-linux-androideabi-nm \
---extra-cflags="-I${PREFIX}/x264/android/arm/include" \
---extra-ldflags="-L${PREFIX}/x264/android/arm/lib" \
 --extra-cflags="-I${PREFIX}/../mp3lame/include" \
 --extra-ldflags="-L${PREFIX}/mp3lame/local/armeabi-v7a" "
 
@@ -49,8 +47,6 @@ function build_ARMv7() {
     libavformat/libavformat.a \
     libavutil/libavutil.a \
     libswscale/libswscale.a \
-    libpostproc/libpostproc.a \
-    ${PREFIX}/x264/android/arm/lib/libx264.a \
     ${PREFIX}/mp3lame/local/armeabi-v7a/libmp3lame.a \
     -Wl,--no-whole-archive -lm -lz
 

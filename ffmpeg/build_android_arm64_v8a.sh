@@ -13,8 +13,6 @@ GENERAL="\
 --cc=$PREBUILT/bin/aarch64-linux-android-gcc \
 --cross-prefix=$PREBUILT/bin/aarch64-linux-android- \
 --nm=$PREBUILT/bin/aarch64-linux-android-nm \
---extra-cflags="-I${PREFIX}/x264/android/arm64/include" \
---extra-ldflags="-L${PREFIX}/x264/android/arm64/lib" \
 --extra-cflags="-I${PREFIX}/../mp3lame/include" \
 --extra-ldflags="-L${PREFIX}/mp3lame/local/arm64-v8a" "
 
@@ -33,7 +31,7 @@ function build_arm64
   ${GENERAL} \
   --sysroot=$PLATFORM \
   --extra-cflags="" \
-  --extra-ldflags="-lx264 -Wl,-rpath-link=$PLATFORM/usr/lib -L$PLATFORM/usr/lib -nostdlib -lc -lm -ldl -llog" \
+  --extra-ldflags="-Wl,-rpath-link=$PLATFORM/usr/lib -L$PLATFORM/usr/lib -nostdlib -lc -lm -ldl -llog" \
   ${COMMON_SET}
 
 
@@ -52,8 +50,6 @@ function build_arm64
    libavformat/libavformat.a \
    libavutil/libavutil.a \
    libswscale/libswscale.a \
-   libpostproc/libpostproc.a \
-   ${PREFIX}/x264/android/arm64/lib/libx264.a \
    ${PREFIX}/mp3lame/local/arm64-v8a/libmp3lame.a \
    -Wl,--no-whole-archive -lm -lz
 

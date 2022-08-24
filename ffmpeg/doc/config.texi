@@ -422,7 +422,7 @@
 @c @set config-libcdio no
 @c @set config-librubberband no
 @c @set config-libvidstab no
-@set config-libx264 yes
+@c @set config-libx264 no
 @c @set config-libx265 no
 @c @set config-libxavs no
 @c @set config-libxvid no
@@ -519,7 +519,7 @@
 @set config-small yes
 @set config-static yes
 @set config-swscale-alpha yes
-@set config-gpl yes
+@c @set config-gpl no
 @set config-nonfree yes
 @set config-version3 yes
 @set config-avcodec yes
@@ -528,12 +528,12 @@
 @set config-avformat yes
 @c @set config-avresample no
 @set config-avutil yes
-@set config-postproc yes
+@c @set config-postproc no
 @set config-swresample yes
 @set config-swscale yes
 @c @set config-ffplay no
 @c @set config-ffprobe no
-@set config-ffserver yes
+@c @set config-ffserver no
 @c @set config-ffmpeg no
 @set config-dct yes
 @c @set config-dwt no
@@ -586,7 +586,7 @@
 @set config-frame-thread-encoder yes
 @c @set config-g722dsp no
 @set config-golomb yes
-@set config-gplv3 yes
+@c @set config-gplv3 no
 @set config-h263dsp yes
 @set config-h264chroma yes
 @set config-h264dsp yes
@@ -605,7 +605,7 @@
 @set config-iso-media yes
 @set config-ividsp yes
 @set config-jpegtables yes
-@c @set config-lgplv3 no
+@set config-lgplv3 yes
 @c @set config-libx262 no
 @c @set config-llauddsp no
 @c @set config-llviddsp no
@@ -628,12 +628,12 @@
 @c @set config-rangecoder no
 @set config-riffdec yes
 @set config-riffenc yes
-@set config-rtpdec yes
+@c @set config-rtpdec no
 @set config-rtpenc-chain yes
 @c @set config-rv34dsp no
 @set config-sinewin yes
 @c @set config-snappy no
-@set config-srtp yes
+@c @set config-srtp no
 @set config-startcode yes
 @c @set config-texturedsp no
 @c @set config-texturedspenc no
@@ -652,8 +652,8 @@
 @c @set config-dump-extradata-bsf no
 @c @set config-dca-core-bsf no
 @c @set config-extract-extradata-bsf no
-@set config-h264-mp4toannexb-bsf yes
-@set config-hevc-mp4toannexb-bsf yes
+@c @set config-h264-mp4toannexb-bsf no
+@c @set config-hevc-mp4toannexb-bsf no
 @c @set config-imx-dump-header-bsf no
 @c @set config-mjpeg2jpeg-bsf no
 @c @set config-mjpega-dump-header-bsf no
@@ -747,7 +747,7 @@
 @set config-h264-decoder yes
 @c @set config-h264-crystalhd-decoder no
 @c @set config-h264-v4l2m2m-decoder no
-@set config-h264-mediacodec-decoder yes
+@c @set config-h264-mediacodec-decoder no
 @c @set config-h264-mmal-decoder no
 @c @set config-h264-qsv-decoder no
 @c @set config-h264-rkmpp-decoder no
@@ -1157,18 +1157,18 @@
 @c @set config-libopenh264-decoder no
 @c @set config-h264-cuvid-decoder no
 @c @set config-hevc-cuvid-decoder no
-@set config-hevc-mediacodec-decoder yes
+@c @set config-hevc-mediacodec-decoder no
 @c @set config-mjpeg-cuvid-decoder no
 @c @set config-mpeg1-cuvid-decoder no
 @c @set config-mpeg2-cuvid-decoder no
 @c @set config-mpeg4-cuvid-decoder no
-@set config-mpeg4-mediacodec-decoder yes
+@c @set config-mpeg4-mediacodec-decoder no
 @c @set config-vc1-cuvid-decoder no
 @c @set config-vp8-cuvid-decoder no
-@set config-vp8-mediacodec-decoder yes
+@c @set config-vp8-mediacodec-decoder no
 @c @set config-vp8-qsv-decoder no
 @c @set config-vp9-cuvid-decoder no
-@set config-vp9-mediacodec-decoder yes
+@c @set config-vp9-mediacodec-decoder no
 @c @set config-aa-demuxer no
 @c @set config-aac-demuxer no
 @c @set config-ac3-demuxer no
@@ -1351,13 +1351,13 @@
 @c @set config-realtext-demuxer no
 @c @set config-redspark-demuxer no
 @c @set config-rl2-demuxer no
-@set config-rm-demuxer yes
+@c @set config-rm-demuxer no
 @c @set config-roq-demuxer no
 @c @set config-rpl-demuxer no
 @c @set config-rsd-demuxer no
 @c @set config-rso-demuxer no
 @c @set config-rtp-demuxer no
-@set config-rtsp-demuxer yes
+@c @set config-rtsp-demuxer no
 @c @set config-s337m-demuxer no
 @c @set config-sami-demuxer no
 @c @set config-sap-demuxer no
@@ -1476,7 +1476,7 @@
 @c @set config-flv-encoder no
 @set config-gif-encoder yes
 @c @set config-h261-encoder no
-@c @set config-h263-encoder no
+@set config-h263-encoder yes
 @c @set config-h263p-encoder no
 @c @set config-hap-encoder no
 @c @set config-huffyuv-encoder no
@@ -1486,7 +1486,7 @@
 @set config-mjpeg-encoder yes
 @c @set config-mpeg1video-encoder no
 @c @set config-mpeg2video-encoder no
-@c @set config-mpeg4-encoder no
+@set config-mpeg4-encoder yes
 @c @set config-msmpeg4v2-encoder no
 @c @set config-msmpeg4v3-encoder no
 @c @set config-msvideo1-encoder no
@@ -1625,7 +1625,7 @@
 @c @set config-libwebp-anim-encoder no
 @c @set config-libwebp-encoder no
 @c @set config-libx262-encoder no
-@set config-libx264-encoder yes
+@c @set config-libx264-encoder no
 @c @set config-libx264rgb-encoder no
 @c @set config-libx265-encoder no
 @c @set config-libxavs-encoder no
@@ -2111,7 +2111,7 @@
 @c @set config-dv-muxer no
 @c @set config-eac3-muxer no
 @c @set config-f4v-muxer no
-@set config-ffm-muxer yes
+@c @set config-ffm-muxer no
 @c @set config-ffmetadata-muxer no
 @c @set config-fifo-muxer no
 @c @set config-filmstrip-muxer no
@@ -2271,8 +2271,8 @@
 @c @set config-gsm-parser no
 @c @set config-h261-parser no
 @set config-h263-parser yes
-@set config-h264-parser yes
-@set config-hevc-parser yes
+@c @set config-h264-parser no
+@c @set config-hevc-parser no
 @c @set config-mjpeg-parser no
 @c @set config-mlp-parser no
 @set config-mpeg4video-parser yes
@@ -2303,7 +2303,7 @@
 @c @set config-ftp-protocol no
 @c @set config-gopher-protocol no
 @c @set config-hls-protocol no
-@set config-http-protocol yes
+@c @set config-http-protocol no
 @c @set config-httpproxy-protocol no
 @c @set config-https-protocol no
 @c @set config-icecast-protocol no
@@ -2318,17 +2318,17 @@
 @c @set config-rtmpt-protocol no
 @c @set config-rtmpte-protocol no
 @c @set config-rtmpts-protocol no
-@set config-rtp-protocol yes
+@c @set config-rtp-protocol no
 @c @set config-sctp-protocol no
 @c @set config-srtp-protocol no
 @c @set config-subfile-protocol no
 @c @set config-tee-protocol no
-@set config-tcp-protocol yes
+@c @set config-tcp-protocol no
 @c @set config-tls-gnutls-protocol no
 @c @set config-tls-schannel-protocol no
 @c @set config-tls-securetransport-protocol no
 @c @set config-tls-openssl-protocol no
-@set config-udp-protocol yes
+@c @set config-udp-protocol no
 @c @set config-udplite-protocol no
 @c @set config-unix-protocol no
 @c @set config-librtmp-protocol no

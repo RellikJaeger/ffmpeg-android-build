@@ -10,10 +10,10 @@ LIBPREF=lib
 LIBSUF=.a
 
 extralibs_avutil="  -lm"
-extralibs_avcodec="-lx264 -lmp3lame -lm  -lz -pthread -pthread -lgcc "
-extralibs_avformat="-lx264 -lmp3lame -lm  -lz -pthread -pthread -lgcc "
-extralibs_avdevice="-lx264 -lmp3lame -lm  -lz -pthread -pthread -lgcc "
-extralibs_avfilter="-lx264 -lmp3lame -lm  -lz -pthread -pthread -lgcc "
+extralibs_avcodec="-lmp3lame -lm  -lz -pthread -pthread -lgcc "
+extralibs_avformat="-lmp3lame -lm  -lz -pthread -pthread -lgcc "
+extralibs_avdevice="-lmp3lame -lm  -lz -pthread -pthread -lgcc "
+extralibs_avfilter="-lmp3lame -lm  -lz -pthread -pthread -lgcc "
 extralibs_avresample="-lm"
 extralibs_postproc=""
 extralibs_swscale="-lm"
