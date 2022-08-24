@@ -1,0 +1,14 @@
+prefix=/Users/guaishou/Git/Github/ffmpeg-android-build/build/ffmpeg/android/armeabi-v7a
+exec_prefix=${prefix}
+libdir=/Users/guaishou/Git/Github/ffmpeg-android-build/build/ffmpeg/android/armeabi-v7a/lib
+includedir=/Users/guaishou/Git/Github/ffmpeg-android-build/build/ffmpeg/android/armeabi-v7a/include
+
+Name: libavfilter
+Description: FFmpeg audio/video filtering library
+Version: 6.107.100
+Requires: libswscale >= 4.8.100, libswresample >= 2.9.100, libavutil >= 55.78.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavfilter -lx264 -lm -lz -pthread -pthread -lgcc
+Libs.private: 
+Cflags: -I${includedir}
