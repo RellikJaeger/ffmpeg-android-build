@@ -41,7 +41,7 @@ static void pgm_save(unsigned char *buf, int wrap, int xsize, int ysize,
     FILE *f;
     int i;
 
-    f = fopen(filename,"w");
+    f = fopen(filename,"wb");
     fprintf(f, "P5\n%d %d\n%d\n", xsize, ysize, 255);
     for (i = 0; i < ysize; i++)
         fwrite(buf + i * wrap, 1, xsize, f);
@@ -92,16 +92,16 @@ int main(int argc, char **argv)
     uint8_t *data;
     size_t   data_size;
     int ret;
+    int eof;
     AVPacket *pkt;
 
     if (argc <= 2) {
-        fprintf(stderr, "Usage: %s <input file> <output file>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <input file> <output file>\n"
+                "And check your input file is encoded by mpeg1video please.\n", argv[0]);
         exit(0);
     }
     filename    = argv[1];
     outfilename = argv[2];
-
-    avcodec_register_all();
 
     pkt = av_packet_alloc();
     if (!pkt)
@@ -151,15 +151,16 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    while (!feof(f)) {
+    do {
         /* read raw data from the input file */
         data_size = fread(inbuf, 1, INBUF_SIZE, f);
-        if (!data_size)
+        if (ferror(f))
             break;
+        eof = !data_size;
 
         /* use the parser to split the data into frames */
         data = inbuf;
-        while (data_size > 0) {
+        while (data_size > 0 || eof) {
             ret = av_parser_parse2(parser, c, &pkt->data, &pkt->size,
                                    data, data_size, AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
             if (ret < 0) {
@@ -171,8 +172,10 @@ int main(int argc, char **argv)
 
             if (pkt->size)
                 decode(c, frame, pkt, outfilename);
+            else if (eof)
+                break;
         }
-    }
+    } while (!eof);
 
     /* flush the decoder */
     decode(c, frame, NULL, outfilename);

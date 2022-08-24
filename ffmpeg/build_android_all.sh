@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-./configure --disable-x86asm
 
 chmod a+x build_android_*.sh
 

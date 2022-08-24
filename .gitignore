@@ -141,3 +141,58 @@ dkms.conf
 *.lai
 
 # Executables
+### C++ template
+# Prerequisites
+
+# Compiled Object files
+*.lo
+
+# Precompiled Headers
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+
+# Compiled Static libraries
+*.la
+*.a
+*.lib
+
+# Executables
+
+### C template
+# Prerequisites
+
+# Object files
+
+# Linker output
+
+# Precompiled Headers
+
+# Libraries
+
+# Shared objects (inc. Windows DLLs)
+*.so.*
+
+# Executables
+
+# Debug files
+
+# Kernel Module Compile Results
+
+### CMake template
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Testing
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+

@@ -15,9 +15,11 @@ FFMpeg下载地址： http://ffmpeg.org/download.html
 x264下载地址： https://www.videolan.org/developers/x264.html  需要注意的是x264的开源协议是GPL的，在使用的过程中请遵守开源协议，或者不使用x264进行编码
 
 ### Build
-1. edit build_android.sh NDK path
-2. `$ ./build_android.sh`
-3. libffmpeg.so will be built to `build/ffmpeg/android/{armeabi-v7a arm64-v8a}/`
+必备软件:autoconf automake libtool pkg-config curl cmake gcc gperf texinfo yasm nasm bison autogen
+1. cd ffmpeg and run ./configure 
+2. edit build_android.sh NDK path
+3. `$ ./build_android.sh`
+4. libffmpeg.so will be built to `build/ffmpeg/android/{armeabi-v7a arm64-v8a}/`
 
 编译好的工程地址：https://github.com/bookzhan/ffmpeg-android-build.git
 
@@ -42,10 +44,11 @@ x264 download address: https://www.videolan.org/developers/x264.html It should b
 
 
 ### Build
-
-1. edit build_android.sh NDK path
-2. `$ ./build_android.sh`
-3. libffmpeg.so will be built to `build/ffmpeg/android/{armeabi-v7a arm64-v8a}/`
+Essential software:autoconf automake libtool pkg-config curl cmake gcc gperf 
+1. cd ffmpeg and run ./configure
+2. edit build_android.sh NDK path
+3. `$ ./build_android.sh`
+4. libffmpeg.so will be built to `build/ffmpeg/android/{armeabi-v7a arm64-v8a}/`
 
 Compiled project address：https://github.com/bookzhan/ffmpeg-android-build.git
 
