@@ -51,10 +51,12 @@
 #include "libavutil/opt.h"
 #include "libavutil/random_seed.h"
 #include "libavutil/parseutils.h"
+#include "libavutil/time.h"
 #include "libavutil/timecode.h"
 #include "libavutil/time_internal.h"
 #include "libavutil/tree.h"
 #include "libavutil/lfg.h"
+#include "libavutil/detection_bbox.h"
 #include "avfilter.h"
 #include "drawutils.h"
 #include "formats.h"
@@ -88,6 +90,9 @@ static const char *const var_names[] = {
     "x",
     "y",
     "pict_type",
+    "pkt_pos",
+    "pkt_duration",
+    "pkt_size",
     NULL
 };
 
@@ -125,6 +130,9 @@ enum var_name {
     VAR_X,
     VAR_Y,
     VAR_PICT_TYPE,
+    VAR_PKT_POS,
+    VAR_PKT_DURATION,
+    VAR_PKT_SIZE,
     VAR_VARS_NB
 };
 
@@ -191,8 +199,10 @@ typedef struct DrawTextContext {
     AVRational  tc_rate;            ///< frame rate for timecode
     AVTimecode  tc;                 ///< timecode context
     int tc24hmax;                   ///< 1 if timecode is wrapped to 24 hours, 0 otherwise
-    int reload;                     ///< reload text file for each frame
+    int reload;                     ///< reload text file at specified frame interval
     int start_number;               ///< starting frame number for n/frame_num var
+    char *text_source_string;       ///< the string to specify text data source
+    enum AVFrameSideDataType text_source;
 #if CONFIG_LIBFRIBIDI
     int text_shaping;               ///< 1 to shape the text before drawing it
 #endif
@@ -203,20 +213,20 @@ typedef struct DrawTextContext {
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 
 static const AVOption drawtext_options[]= {
-    {"fontfile",    "set font file",        OFFSET(fontfile),           AV_OPT_TYPE_STRING, {.str=NULL},  CHAR_MIN, CHAR_MAX, FLAGS},
-    {"text",        "set text",             OFFSET(text),               AV_OPT_TYPE_STRING, {.str=NULL},  CHAR_MIN, CHAR_MAX, FLAGS},
-    {"textfile",    "set text file",        OFFSET(textfile),           AV_OPT_TYPE_STRING, {.str=NULL},  CHAR_MIN, CHAR_MAX, FLAGS},
-    {"fontcolor",   "set foreground color", OFFSET(fontcolor.rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, CHAR_MIN, CHAR_MAX, FLAGS},
-    {"fontcolor_expr", "set foreground color expression", OFFSET(fontcolor_expr), AV_OPT_TYPE_STRING, {.str=""}, CHAR_MIN, CHAR_MAX, FLAGS},
-    {"boxcolor",    "set box color",        OFFSET(boxcolor.rgba),      AV_OPT_TYPE_COLOR,  {.str="white"}, CHAR_MIN, CHAR_MAX, FLAGS},
-    {"bordercolor", "set border color",     OFFSET(bordercolor.rgba),   AV_OPT_TYPE_COLOR,  {.str="black"}, CHAR_MIN, CHAR_MAX, FLAGS},
-    {"shadowcolor", "set shadow color",     OFFSET(shadowcolor.rgba),   AV_OPT_TYPE_COLOR,  {.str="black"}, CHAR_MIN, CHAR_MAX, FLAGS},
+    {"fontfile",    "set font file",        OFFSET(fontfile),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
+    {"text",        "set text",             OFFSET(text),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
+    {"textfile",    "set text file",        OFFSET(textfile),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
+    {"fontcolor",   "set foreground color", OFFSET(fontcolor.rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
+    {"fontcolor_expr", "set foreground color expression", OFFSET(fontcolor_expr), AV_OPT_TYPE_STRING, {.str=""}, 0, 0, FLAGS},
+    {"boxcolor",    "set box color",        OFFSET(boxcolor.rgba),      AV_OPT_TYPE_COLOR,  {.str="white"}, 0, 0, FLAGS},
+    {"bordercolor", "set border color",     OFFSET(bordercolor.rgba),   AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
+    {"shadowcolor", "set shadow color",     OFFSET(shadowcolor.rgba),   AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, FLAGS},
     {"box",         "set box",              OFFSET(draw_box),           AV_OPT_TYPE_BOOL,   {.i64=0},     0,        1       , FLAGS},
     {"boxborderw",  "set box border width", OFFSET(boxborderw),         AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX , FLAGS},
     {"line_spacing",  "set line spacing in pixels", OFFSET(line_spacing),   AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX,FLAGS},
-    {"fontsize",    "set font size",        OFFSET(fontsize_expr),      AV_OPT_TYPE_STRING, {.str=NULL},  CHAR_MIN, CHAR_MAX , FLAGS},
-    {"x",           "set x expression",     OFFSET(x_expr),             AV_OPT_TYPE_STRING, {.str="0"},   CHAR_MIN, CHAR_MAX, FLAGS},
-    {"y",           "set y expression",     OFFSET(y_expr),             AV_OPT_TYPE_STRING, {.str="0"},   CHAR_MIN, CHAR_MAX, FLAGS},
+    {"fontsize",    "set font size",        OFFSET(fontsize_expr),      AV_OPT_TYPE_STRING, {.str=NULL},  0, 0 , FLAGS},
+    {"x",           "set x expression",     OFFSET(x_expr),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
+    {"y",           "set y expression",     OFFSET(y_expr),             AV_OPT_TYPE_STRING, {.str="0"},   0, 0, FLAGS},
     {"shadowx",     "set shadow x offset",  OFFSET(shadowx),            AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX , FLAGS},
     {"shadowy",     "set shadow y offset",  OFFSET(shadowy),            AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX , FLAGS},
     {"borderw",     "set border width",     OFFSET(borderw),            AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN,  INT_MAX , FLAGS},
@@ -231,15 +241,16 @@ static const AVOption drawtext_options[]= {
         {"normal",   "set normal expansion",                OFFSET(exp_mode), AV_OPT_TYPE_CONST, {.i64=EXP_NORMAL},   0, 0, FLAGS, "expansion"},
         {"strftime", "set strftime expansion (deprecated)", OFFSET(exp_mode), AV_OPT_TYPE_CONST, {.i64=EXP_STRFTIME}, 0, 0, FLAGS, "expansion"},
 
-    {"timecode",        "set initial timecode",             OFFSET(tc_opt_string), AV_OPT_TYPE_STRING,   {.str=NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
+    {"timecode",        "set initial timecode",             OFFSET(tc_opt_string), AV_OPT_TYPE_STRING,   {.str=NULL}, 0, 0, FLAGS},
     {"tc24hmax",        "set 24 hours max (timecode only)", OFFSET(tc24hmax),      AV_OPT_TYPE_BOOL,     {.i64=0},           0,        1, FLAGS},
     {"timecode_rate",   "set rate (timecode only)",         OFFSET(tc_rate),       AV_OPT_TYPE_RATIONAL, {.dbl=0},           0,  INT_MAX, FLAGS},
     {"r",               "set rate (timecode only)",         OFFSET(tc_rate),       AV_OPT_TYPE_RATIONAL, {.dbl=0},           0,  INT_MAX, FLAGS},
     {"rate",            "set rate (timecode only)",         OFFSET(tc_rate),       AV_OPT_TYPE_RATIONAL, {.dbl=0},           0,  INT_MAX, FLAGS},
-    {"reload",     "reload text file for each frame",                       OFFSET(reload),     AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"reload",     "reload text file at specified frame interval", OFFSET(reload),     AV_OPT_TYPE_INT, {.i64=0}, 0, INT_MAX, FLAGS},
     { "alpha",       "apply alpha while rendering", OFFSET(a_expr),      AV_OPT_TYPE_STRING, { .str = "1"     },          .flags = FLAGS },
-    {"fix_bounds", "check and fix text coords to avoid clipping", OFFSET(fix_bounds), AV_OPT_TYPE_BOOL, {.i64=1}, 0, 1, FLAGS},
+    {"fix_bounds", "check and fix text coords to avoid clipping", OFFSET(fix_bounds), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
     {"start_number", "start frame number for n/frame_num variable", OFFSET(start_number), AV_OPT_TYPE_INT, {.i64=0}, 0, INT_MAX, FLAGS},
+    {"text_source", "the source of text", OFFSET(text_source_string), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS },
 
 #if CONFIG_LIBFRIBIDI
     {"text_shaping", "attempt to shape text before drawing", OFFSET(text_shaping), AV_OPT_TYPE_BOOL, {.i64=1}, 0, 1, FLAGS},
@@ -562,6 +573,11 @@ static int load_font(AVFilterContext *ctx)
     return err;
 }
 
+static inline int is_newline(uint32_t c)
+{
+    return c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
 static int load_textfile(AVFilterContext *ctx)
 {
     DrawTextContext *s = ctx->priv;
@@ -577,6 +593,8 @@ static int load_textfile(AVFilterContext *ctx)
         return err;
     }
 
+    if (textbuf_size > 0 && is_newline(textbuf[textbuf_size - 1]))
+        textbuf_size--;
     if (textbuf_size > SIZE_MAX - 1 || !(tmp = av_realloc(s->text, textbuf_size + 1))) {
         av_file_unmap(textbuf, textbuf_size);
         return AVERROR(ENOMEM);
@@ -587,11 +605,6 @@ static int load_textfile(AVFilterContext *ctx)
     av_file_unmap(textbuf, textbuf_size);
 
     return 0;
-}
-
-static inline int is_newline(uint32_t c)
-{
-    return c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
 
 #if CONFIG_LIBFRIBIDI
@@ -682,6 +695,16 @@ out:
 }
 #endif
 
+static enum AVFrameSideDataType text_source_string_parse(const char *text_source_string)
+{
+    av_assert0(text_source_string);
+    if (!strcmp(text_source_string, "side_data_detection_bboxes")) {
+        return AV_FRAME_DATA_DETECTION_BBOXES;
+    } else {
+        return AVERROR(EINVAL);
+    }
+}
+
 static av_cold int init(AVFilterContext *ctx)
 {
     int err;
@@ -723,9 +746,28 @@ static av_cold int init(AVFilterContext *ctx)
             s->text = av_strdup("");
     }
 
+    if (s->text_source_string) {
+        s->text_source = text_source_string_parse(s->text_source_string);
+        if ((int)s->text_source < 0) {
+            av_log(ctx, AV_LOG_ERROR, "Error text source: %s\n", s->text_source_string);
+            return AVERROR(EINVAL);
+        }
+    }
+
+    if (s->text_source == AV_FRAME_DATA_DETECTION_BBOXES) {
+        if (s->text) {
+            av_log(ctx, AV_LOG_WARNING, "Multiple texts provided, will use text_source only\n");
+            av_free(s->text);
+        }
+        s->text = av_mallocz(AV_DETECTION_BBOX_LABEL_NAME_MAX_SIZE *
+                             (AV_NUM_DETECTION_BBOX_CLASSIFY + 1));
+        if (!s->text)
+            return AVERROR(ENOMEM);
+    }
+
     if (!s->text) {
         av_log(ctx, AV_LOG_ERROR,
-               "Either text, a valid file or a timecode must be provided\n");
+               "Either text, a valid file, a timecode or text source must be provided\n");
         return AVERROR(EINVAL);
     }
 
@@ -823,6 +865,7 @@ static int config_input(AVFilterLink *inlink)
 {
     AVFilterContext *ctx = inlink->dst;
     DrawTextContext *s = ctx->priv;
+    char *expr;
     int ret;
 
     ff_draw_init(&s->dc, inlink->format, FF_DRAW_PROCESS_ALPHA);
@@ -848,34 +891,64 @@ static int config_input(AVFilterLink *inlink)
     av_expr_free(s->a_pexpr);
     s->x_pexpr = s->y_pexpr = s->a_pexpr = NULL;
 
-    if ((ret = av_expr_parse(&s->x_pexpr, s->x_expr, var_names,
+    if ((ret = av_expr_parse(&s->x_pexpr, expr = s->x_expr, var_names,
                              NULL, NULL, fun2_names, fun2, 0, ctx)) < 0 ||
-        (ret = av_expr_parse(&s->y_pexpr, s->y_expr, var_names,
+        (ret = av_expr_parse(&s->y_pexpr, expr = s->y_expr, var_names,
                              NULL, NULL, fun2_names, fun2, 0, ctx)) < 0 ||
-        (ret = av_expr_parse(&s->a_pexpr, s->a_expr, var_names,
-                             NULL, NULL, fun2_names, fun2, 0, ctx)) < 0)
-
+        (ret = av_expr_parse(&s->a_pexpr, expr = s->a_expr, var_names,
+                             NULL, NULL, fun2_names, fun2, 0, ctx)) < 0) {
+        av_log(ctx, AV_LOG_ERROR, "Failed to parse expression: %s \n", expr);
         return AVERROR(EINVAL);
+    }
 
     return 0;
 }
 
 static int command(AVFilterContext *ctx, const char *cmd, const char *arg, char *res, int res_len, int flags)
 {
-    DrawTextContext *s = ctx->priv;
+    DrawTextContext *old = ctx->priv;
+    DrawTextContext *new = NULL;
+    int ret;
 
     if (!strcmp(cmd, "reinit")) {
-        int ret;
-        uninit(ctx);
-        s->reinit = 1;
-        if ((ret = av_set_options_string(ctx, arg, "=", ":")) < 0)
-            return ret;
-        if ((ret = init(ctx)) < 0)
-            return ret;
-        return config_input(ctx->inputs[0]);
-    }
+        new = av_mallocz(sizeof(DrawTextContext));
+        if (!new)
+            return AVERROR(ENOMEM);
 
-    return AVERROR(ENOSYS);
+        new->class = &drawtext_class;
+        ret = av_opt_copy(new, old);
+        if (ret < 0)
+            goto fail;
+
+        ctx->priv = new;
+        ret = av_set_options_string(ctx, arg, "=", ":");
+        if (ret < 0) {
+            ctx->priv = old;
+            goto fail;
+        }
+
+        ret = init(ctx);
+        if (ret < 0) {
+            uninit(ctx);
+            ctx->priv = old;
+            goto fail;
+        }
+
+        new->reinit = 1;
+
+        ctx->priv = old;
+        uninit(ctx);
+        av_freep(&old);
+
+        ctx->priv = new;
+        return config_input(ctx->inputs[0]);
+    } else
+        return AVERROR(ENOSYS);
+
+fail:
+    av_log(ctx, AV_LOG_ERROR, "Failed to process command. Continuing with existing parameters.\n");
+    av_freep(&new);
+    return ret;
 }
 
 static int func_pict_type(AVFilterContext *ctx, AVBPrint *bp,
@@ -915,6 +988,14 @@ static int func_pts(AVFilterContext *ctx, AVBPrint *bp,
             if (ms < 0) {
                 sign = '-';
                 ms = -ms;
+            }
+            if (argc >= 3) {
+                if (!strcmp(argv[2], "24HH")) {
+                    ms %= 24 * 60 * 60 * 1000;
+                } else {
+                    av_log(ctx, AV_LOG_ERROR, "Invalid argument '%s'\n", argv[2]);
+                    return AVERROR(EINVAL);
+                }
             }
             av_bprintf(bp, "%c%02d:%02d:%02d.%03d", sign,
                        (int)(ms / (60 * 60 * 1000)),
@@ -965,15 +1046,78 @@ static int func_strftime(AVFilterContext *ctx, AVBPrint *bp,
                          char *fct, unsigned argc, char **argv, int tag)
 {
     const char *fmt = argc ? argv[0] : "%Y-%m-%d %H:%M:%S";
+    const char *fmt_begin = fmt;
+    int64_t unow;
     time_t now;
     struct tm tm;
+    const char *begin;
+    const char *tmp;
+    int len;
+    int div;
+    AVBPrint fmt_bp;
 
-    time(&now);
-    if (tag == 'L')
+    av_bprint_init(&fmt_bp, 0, AV_BPRINT_SIZE_UNLIMITED);
+
+    unow = av_gettime();
+    now  = unow / 1000000;
+    if (tag == 'L' || tag == 'm')
         localtime_r(&now, &tm);
     else
         tm = *gmtime_r(&now, &tm);
-    av_bprint_strftime(bp, fmt, &tm);
+
+    // manually parse format for %N (fractional seconds)
+    begin = fmt;
+    while ((begin = strchr(begin, '%'))) {
+        tmp = begin + 1;
+        len = 0;
+
+        // skip escaped "%%"
+        if (*tmp == '%') {
+            begin = tmp + 1;
+            continue;
+        }
+
+        // count digits between % and possible N
+        while (*tmp != '\0' && av_isdigit((int)*tmp)) {
+            len++;
+            tmp++;
+        }
+
+        // N encountered, insert time
+        if (*tmp == 'N') {
+            int num_digits = 3; // default show millisecond [1,6]
+
+            // if digit given, expect [1,6], warn & clamp otherwise
+            if (len == 1) {
+                num_digits = av_clip(*(begin + 1) - '0', 1, 6);
+            } else if (len > 1) {
+                av_log(ctx, AV_LOG_WARNING, "Invalid number of decimals for %%N, using default of %i\n", num_digits);
+            }
+
+            len += 2; // add % and N to get length of string part
+
+            div = pow(10, 6 - num_digits);
+
+            av_bprintf(&fmt_bp, "%.*s%0*d", (int)(begin - fmt_begin), fmt_begin, num_digits, (int)(unow % 1000000) / div);
+
+            begin += len;
+            fmt_begin = begin;
+
+            continue;
+        }
+
+        begin = tmp;
+    }
+
+    av_bprintf(&fmt_bp, "%s", fmt_begin);
+    if (!av_bprint_is_complete(&fmt_bp)) {
+        av_log(ctx, AV_LOG_WARNING, "Format string truncated at %u/%u.", fmt_bp.size, fmt_bp.len);
+    }
+
+    av_bprint_strftime(bp, fmt_bp.str, &tm);
+
+    av_bprint_finalize(&fmt_bp, NULL);
+
     return 0;
 }
 
@@ -1040,10 +1184,12 @@ static int func_eval_expr_int_format(AVFilterContext *ctx, AVBPrint *bp,
 
     feclearexcept(FE_ALL_EXCEPT);
     intval = res;
+#if defined(FE_INVALID) && defined(FE_OVERFLOW) && defined(FE_UNDERFLOW)
     if ((ret = fetestexcept(FE_INVALID|FE_OVERFLOW|FE_UNDERFLOW))) {
         av_log(ctx, AV_LOG_ERROR, "Conversion of floating-point result to int failed. Control register: 0x%08x. Conversion result: %d\n", ret, intval);
         return AVERROR(EINVAL);
     }
+#endif
 
     if (argc == 3)
         av_strlcatf(fmt_str, sizeof(fmt_str), "0%u", positions);
@@ -1180,7 +1326,8 @@ static int draw_glyphs(DrawTextContext *s, AVFrame *frame,
     for (i = 0, p = text; *p; i++) {
         FT_Bitmap bitmap;
         Glyph dummy = { 0 };
-        GET_UTF8(code, *p++, continue;);
+        GET_UTF8(code, *p ? *p++ : 0, code = 0xfffd; goto continue_on_invalid;);
+continue_on_invalid:
 
         /* skip new line chars, just go to new line */
         if (code == '\n' || code == '\r' || code == '\t')
@@ -1318,7 +1465,8 @@ static int draw_text(AVFilterContext *ctx, AVFrame *frame,
 
     /* load and cache glyphs */
     for (i = 0, p = text; *p; i++) {
-        GET_UTF8(code, *p++, continue;);
+        GET_UTF8(code, *p ? *p++ : 0, code = 0xfffd; goto continue_on_invalid;);
+continue_on_invalid:
 
         /* get glyph */
         dummy.code = code;
@@ -1341,7 +1489,8 @@ static int draw_text(AVFilterContext *ctx, AVFrame *frame,
     /* compute and save position for each glyph */
     glyph = NULL;
     for (i = 0, p = text; *p; i++) {
-        GET_UTF8(code, *p++, continue;);
+        GET_UTF8(code, *p ? *p++ : 0, code = 0xfffd; goto continue_on_invalid2;);
+continue_on_invalid2:
 
         /* skip the \n in the sequence \r\n */
         if (prev_code == '\r' && code == '\n')
@@ -1388,9 +1537,15 @@ static int draw_text(AVFilterContext *ctx, AVFrame *frame,
 
     s->var_values[VAR_LINE_H] = s->var_values[VAR_LH] = s->max_glyph_h;
 
-    s->x = s->var_values[VAR_X] = av_expr_eval(s->x_pexpr, s->var_values, &s->prng);
-    s->y = s->var_values[VAR_Y] = av_expr_eval(s->y_pexpr, s->var_values, &s->prng);
-    s->x = s->var_values[VAR_X] = av_expr_eval(s->x_pexpr, s->var_values, &s->prng);
+    if (s->text_source == AV_FRAME_DATA_DETECTION_BBOXES) {
+        s->var_values[VAR_X] = s->x;
+        s->var_values[VAR_Y] = s->y;
+    } else {
+        s->x = s->var_values[VAR_X] = av_expr_eval(s->x_pexpr, s->var_values, &s->prng);
+        s->y = s->var_values[VAR_Y] = av_expr_eval(s->y_pexpr, s->var_values, &s->prng);
+        /* It is necessary if x is expressed from y  */
+        s->x = s->var_values[VAR_X] = av_expr_eval(s->x_pexpr, s->var_values, &s->prng);
+    }
 
     update_alpha(s);
     update_color_with_alpha(s, &fontcolor  , s->fontcolor  );
@@ -1398,8 +1553,34 @@ static int draw_text(AVFilterContext *ctx, AVFrame *frame,
     update_color_with_alpha(s, &bordercolor, s->bordercolor);
     update_color_with_alpha(s, &boxcolor   , s->boxcolor   );
 
-    box_w = FFMIN(width - 1 , max_text_line_w);
-    box_h = FFMIN(height - 1, y + s->max_glyph_h);
+    box_w = max_text_line_w;
+    box_h = y + s->max_glyph_h;
+
+    if (s->fix_bounds) {
+
+        /* calculate footprint of text effects */
+        int boxoffset     = s->draw_box ? FFMAX(s->boxborderw, 0) : 0;
+        int borderoffset  = s->borderw  ? FFMAX(s->borderw, 0) : 0;
+
+        int offsetleft = FFMAX3(boxoffset, borderoffset,
+                                (s->shadowx < 0 ? FFABS(s->shadowx) : 0));
+        int offsettop = FFMAX3(boxoffset, borderoffset,
+                                (s->shadowy < 0 ? FFABS(s->shadowy) : 0));
+
+        int offsetright = FFMAX3(boxoffset, borderoffset,
+                                 (s->shadowx > 0 ? s->shadowx : 0));
+        int offsetbottom = FFMAX3(boxoffset, borderoffset,
+                                  (s->shadowy > 0 ? s->shadowy : 0));
+
+
+        if (s->x - offsetleft < 0) s->x = offsetleft;
+        if (s->y - offsettop < 0)  s->y = offsettop;
+
+        if (s->x + box_w + offsetright > width)
+            s->x = FFMAX(width - box_w - offsetright, 0);
+        if (s->y + box_h + offsetbottom > height)
+            s->y = FFMAX(height - box_h - offsetbottom, 0);
+    }
 
     /* draw box */
     if (s->draw_box)
@@ -1432,8 +1613,23 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
     AVFilterLink *outlink = ctx->outputs[0];
     DrawTextContext *s = ctx->priv;
     int ret;
+    const AVDetectionBBoxHeader *header = NULL;
+    const AVDetectionBBox *bbox;
+    AVFrameSideData *sd;
+    int loop = 1;
 
-    if (s->reload) {
+    if (s->text_source == AV_FRAME_DATA_DETECTION_BBOXES) {
+        sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DETECTION_BBOXES);
+        if (sd) {
+            header = (AVDetectionBBoxHeader *)sd->data;
+            loop = header->nb_bboxes;
+        } else {
+            av_log(s, AV_LOG_WARNING, "No detection bboxes.\n");
+            return ff_filter_frame(outlink, frame);
+        }
+    }
+
+    if (s->reload && !(inlink->frame_count_out % s->reload)) {
         if ((ret = load_textfile(ctx)) < 0) {
             av_frame_free(&frame);
             return ret;
@@ -1452,9 +1648,24 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
         NAN : frame->pts * av_q2d(inlink->time_base);
 
     s->var_values[VAR_PICT_TYPE] = frame->pict_type;
+    s->var_values[VAR_PKT_POS] = frame->pkt_pos;
+    s->var_values[VAR_PKT_DURATION] = frame->pkt_duration * av_q2d(inlink->time_base);
+    s->var_values[VAR_PKT_SIZE] = frame->pkt_size;
     s->metadata = frame->metadata;
 
-    draw_text(ctx, frame, frame->width, frame->height);
+    for (int i = 0; i < loop; i++) {
+        if (header) {
+            bbox = av_get_detection_bbox(header, i);
+            strcpy(s->text, bbox->detect_label);
+            for (int j = 0; j < bbox->classify_count; j++) {
+                strcat(s->text, ", ");
+                strcat(s->text, bbox->classify_labels[j]);
+            }
+            s->x = bbox->x;
+            s->y = bbox->y - s->fontsize;
+        }
+        draw_text(ctx, frame, frame->width, frame->height);
+    }
 
     av_log(ctx, AV_LOG_DEBUG, "n:%d t:%f text_w:%d text_h:%d x:%d y:%d\n",
            (int)s->var_values[VAR_N], s->var_values[VAR_T],
@@ -1468,11 +1679,10 @@ static const AVFilterPad avfilter_vf_drawtext_inputs[] = {
     {
         .name           = "default",
         .type           = AVMEDIA_TYPE_VIDEO,
+        .flags          = AVFILTERPAD_FLAG_NEEDS_WRITABLE,
         .filter_frame   = filter_frame,
         .config_props   = config_input,
-        .needs_writable = 1,
     },
-    { NULL }
 };
 
 static const AVFilterPad avfilter_vf_drawtext_outputs[] = {
@@ -1480,19 +1690,18 @@ static const AVFilterPad avfilter_vf_drawtext_outputs[] = {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
     },
-    { NULL }
 };
 
-AVFilter ff_vf_drawtext = {
+const AVFilter ff_vf_drawtext = {
     .name          = "drawtext",
     .description   = NULL_IF_CONFIG_SMALL("Draw text on top of video frames using libfreetype library."),
     .priv_size     = sizeof(DrawTextContext),
     .priv_class    = &drawtext_class,
     .init          = init,
     .uninit        = uninit,
-    .query_formats = query_formats,
-    .inputs        = avfilter_vf_drawtext_inputs,
-    .outputs       = avfilter_vf_drawtext_outputs,
+    FILTER_INPUTS(avfilter_vf_drawtext_inputs),
+    FILTER_OUTPUTS(avfilter_vf_drawtext_outputs),
+    FILTER_QUERY_FUNC(query_formats),
     .process_command = command,
     .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
 };

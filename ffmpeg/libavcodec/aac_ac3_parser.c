@@ -20,6 +20,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config_components.h"
+
 #include "libavutil/channel_layout.h"
 #include "libavutil/common.h"
 #include "parser.h"
@@ -60,6 +62,9 @@ get_next:
                     s->remaining_size += i;
                     goto get_next;
                 }
+                else if (i < 0) {
+                    s->remaining_size += i;
+                }
             }
         }
     }
@@ -86,25 +91,31 @@ get_next:
            the frame). */
         if (avctx->codec_id != AV_CODEC_ID_AAC) {
             avctx->sample_rate = s->sample_rate;
-
-            /* (E-)AC-3: allow downmixing to stereo or mono */
-            if (s->channels > 1 &&
-                avctx->request_channel_layout == AV_CH_LAYOUT_MONO) {
-                avctx->channels       = 1;
-                avctx->channel_layout = AV_CH_LAYOUT_MONO;
-            } else if (s->channels > 2 &&
-                       avctx->request_channel_layout == AV_CH_LAYOUT_STEREO) {
-                avctx->channels       = 2;
-                avctx->channel_layout = AV_CH_LAYOUT_STEREO;
-            } else {
-                avctx->channels = s->channels;
+            if (!CONFIG_EAC3_DECODER || avctx->codec_id != AV_CODEC_ID_EAC3) {
+                av_channel_layout_uninit(&avctx->ch_layout);
+                if (s->channel_layout) {
+                    av_channel_layout_from_mask(&avctx->ch_layout, s->channel_layout);
+                } else {
+                    avctx->ch_layout.order       = AV_CHANNEL_ORDER_UNSPEC;
+                    avctx->ch_layout.nb_channels = s->channels;
+                }
+#if FF_API_OLD_CHANNEL_LAYOUT
+FF_DISABLE_DEPRECATION_WARNINGS
+                avctx->channels = avctx->ch_layout.nb_channels;
                 avctx->channel_layout = s->channel_layout;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
             }
             s1->duration = s->samples;
             avctx->audio_service_type = s->service_type;
         }
 
-        avctx->bit_rate = s->bit_rate;
+        /* Calculate the average bit rate */
+        s->frame_number++;
+        if (!CONFIG_EAC3_DECODER || avctx->codec_id != AV_CODEC_ID_EAC3) {
+            avctx->bit_rate +=
+                (s->bit_rate - avctx->bit_rate) / s->frame_number;
+        }
     }
 
     return i;

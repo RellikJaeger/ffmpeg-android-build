@@ -23,7 +23,6 @@
 
 SECTION_RODATA
 
-align 16
 ps_mask:  dd 0, ~0, ~0, ~0
 ps_mask2: dd 0, ~0,  0, ~0
 ps_mask3: dd 0,  0,  0, ~0
@@ -373,11 +372,6 @@ cglobal imdct36_float, 4,4,9, out, buf, in, win
     movss    [bufq + 4*68], m1
     RET
 %endmacro
-
-%if ARCH_X86_32
-INIT_XMM sse
-DEFINE_IMDCT
-%endif
 
 INIT_XMM sse2
 DEFINE_IMDCT

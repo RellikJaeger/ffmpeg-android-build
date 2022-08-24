@@ -23,7 +23,7 @@
 
 #include "avcodec.h"
 
-extern uint32_t ff_square_tab[512];
+extern const uint32_t ff_square_tab[512];
 
 
 /* minimum alignment rules ;)
@@ -79,11 +79,8 @@ typedef struct MECmpContext {
     me_cmp_func median_sad[6];
 } MECmpContext;
 
-void ff_me_cmp_init_static(void);
-
-int ff_check_alignment(void);
-
 void ff_me_cmp_init(MECmpContext *c, AVCodecContext *avctx);
+void ff_me_cmp_init_aarch64(MECmpContext *c, AVCodecContext *avctx);
 void ff_me_cmp_init_alpha(MECmpContext *c, AVCodecContext *avctx);
 void ff_me_cmp_init_arm(MECmpContext *c, AVCodecContext *avctx);
 void ff_me_cmp_init_ppc(MECmpContext *c, AVCodecContext *avctx);

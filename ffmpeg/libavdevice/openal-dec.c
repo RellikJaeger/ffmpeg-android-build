@@ -139,7 +139,7 @@ static int read_header(AVFormatContext *ctx)
 
     /* Open device for capture */
     ad->device =
-        alcCaptureOpenDevice(ctx->filename[0] ? ctx->filename : NULL,
+        alcCaptureOpenDevice(ctx->url[0] ? ctx->url : NULL,
                              ad->sample_rate,
                              ad->sample_format,
                              ad->sample_rate); /* Maximum 1 second of sample data to be read at once */
@@ -159,7 +159,7 @@ static int read_header(AVFormatContext *ctx)
     par = st->codecpar;
     par->codec_type = AVMEDIA_TYPE_AUDIO;
     par->sample_rate = ad->sample_rate;
-    par->channels = get_al_format_info(ad->sample_format)->channels;
+    par->ch_layout.nb_channels = get_al_format_info(ad->sample_format)->channels;
     par->codec_id = get_al_format_info(ad->sample_format)->codec_id;
 
     /* This is needed to read the audio data */
@@ -241,14 +241,14 @@ static const AVOption options[] = {
 };
 
 static const AVClass class = {
-    .class_name = "openal",
+    .class_name = "openal indev",
     .item_name = av_default_item_name,
     .option = options,
     .version = LIBAVUTIL_VERSION_INT,
     .category = AV_CLASS_CATEGORY_DEVICE_AUDIO_INPUT,
 };
 
-AVInputFormat ff_openal_demuxer = {
+const AVInputFormat ff_openal_demuxer = {
     .name = "openal",
     .long_name = NULL_IF_CONFIG_SMALL("OpenAL audio capture device"),
     .priv_data_size = sizeof(al_data),

@@ -23,7 +23,8 @@
 
 SECTION_RODATA 32
 
-align 32
+ps_p1p1m1m1: dd 0, 0, 0x80000000, 0x80000000, 0, 0, 0x80000000, 0x80000000
+
 ps_cos_vec: dd   0.500603,  0.505471,  0.515447,  0.531043
             dd   0.553104,  0.582935,  0.622504,  0.674808
             dd -10.190008, -3.407609, -2.057781, -1.484165
@@ -37,9 +38,6 @@ ps_cos_vec: dd   0.500603,  0.505471,  0.515447,  0.531043
             dd   1.000000,  0.707107,  1.000000, -0.707107
             dd   1.000000,  0.707107,  1.000000, -0.707107
             dd   0.707107,  0.707107,  0.707107,  0.707107
-
-align 32
-ps_p1p1m1m1: dd 0, 0, 0x80000000, 0x80000000, 0, 0, 0x80000000, 0x80000000
 
 %macro BUTTERFLY 4
     subps  %4, %1, %2
@@ -389,7 +387,7 @@ INIT_XMM
 %endif
 
 
-; void ff_dct32_float_sse(FFTSample *out, const FFTSample *in)
+; void ff_dct32_float(FFTSample *out, const FFTSample *in)
 %macro DCT32_FUNC 0
 cglobal dct32_float, 2, 3, 16, out, in, tmp
     ; pass 1
@@ -476,18 +474,8 @@ cglobal dct32_float, 2, 3, 16, out, in, tmp
 %endmacro
 
 %macro LOAD_INV 2
-%if cpuflag(sse2)
     pshufd      %1, %2, 0x1b
-%elif cpuflag(sse)
-    movaps      %1, %2
-    shufps      %1, %1, 0x1b
-%endif
 %endmacro
-
-%if ARCH_X86_32
-INIT_XMM sse
-DCT32_FUNC
-%endif
 
 INIT_XMM sse2
 DCT32_FUNC

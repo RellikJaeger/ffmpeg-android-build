@@ -30,6 +30,7 @@
 #include "libavutil/opt.h"
 
 #include "avcodec.h"
+#include "codec_internal.h"
 #include "internal.h"
 #include "libopenh264.h"
 
@@ -56,7 +57,7 @@ static av_cold int svc_decode_init(AVCodecContext *avctx)
     WelsTraceCallback callback_function;
 
     if ((err = ff_libopenh264_check_version(avctx)) < 0)
-        return err;
+        return AVERROR_DECODER_NOT_FOUND;
 
     if (WelsCreateDecoder(&s->decoder)) {
         av_log(avctx, AV_LOG_ERROR, "Unable to create decoder\n");
@@ -86,19 +87,40 @@ static av_cold int svc_decode_init(AVCodecContext *avctx)
     return 0;
 }
 
-static int svc_decode_frame(AVCodecContext *avctx, void *data,
+static int svc_decode_frame(AVCodecContext *avctx, AVFrame *avframe,
                             int *got_frame, AVPacket *avpkt)
 {
     SVCContext *s = avctx->priv_data;
     SBufferInfo info = { 0 };
-    uint8_t* ptrs[3];
-    int ret, linesize[3];
-    AVFrame *avframe = data;
+    uint8_t *ptrs[4] = { NULL };
+    int ret, linesize[4];
     DECODING_STATE state;
+#if OPENH264_VER_AT_LEAST(1, 7)
+    int opt;
+#endif
 
-    state = (*s->decoder)->DecodeFrame2(s->decoder, avpkt->data, avpkt->size, ptrs, &info);
+    if (!avpkt->data) {
+#if OPENH264_VER_AT_LEAST(1, 9)
+        int end_of_stream = 1;
+        (*s->decoder)->SetOption(s->decoder, DECODER_OPTION_END_OF_STREAM, &end_of_stream);
+        state = (*s->decoder)->FlushFrame(s->decoder, ptrs, &info);
+#else
+        return 0;
+#endif
+    } else {
+        info.uiInBsTimeStamp = avpkt->pts;
+#if OPENH264_VER_AT_LEAST(1, 4)
+        // Contrary to the name, DecodeFrameNoDelay actually does buffering
+        // and reordering of frames, and is the recommended decoding entry
+        // point since 1.4. This is essential for successfully decoding
+        // B-frames.
+        state = (*s->decoder)->DecodeFrameNoDelay(s->decoder, avpkt->data, avpkt->size, ptrs, &info);
+#else
+        state = (*s->decoder)->DecodeFrame2(s->decoder, avpkt->data, avpkt->size, ptrs, &info);
+#endif
+    }
     if (state != dsErrorFree) {
-        av_log(avctx, AV_LOG_ERROR, "DecodeFrame2 failed\n");
+        av_log(avctx, AV_LOG_ERROR, "DecodeFrame failed\n");
         return AVERROR_UNKNOWN;
     }
     if (info.iBufferStatus != 1) {
@@ -118,33 +140,34 @@ static int svc_decode_frame(AVCodecContext *avctx, void *data,
 
     linesize[0] = info.UsrData.sSystemBuffer.iStride[0];
     linesize[1] = linesize[2] = info.UsrData.sSystemBuffer.iStride[1];
+    linesize[3] = 0;
     av_image_copy(avframe->data, avframe->linesize, (const uint8_t **) ptrs, linesize, avctx->pix_fmt, avctx->width, avctx->height);
 
-    avframe->pts     = avpkt->pts;
-    avframe->pkt_dts = avpkt->dts;
-#if FF_API_PKT_PTS
-FF_DISABLE_DEPRECATION_WARNINGS
-    avframe->pkt_pts = avpkt->pts;
-FF_ENABLE_DEPRECATION_WARNINGS
+    avframe->pts     = info.uiOutYuvTimeStamp;
+    avframe->pkt_dts = AV_NOPTS_VALUE;
+#if OPENH264_VER_AT_LEAST(1, 7)
+    (*s->decoder)->GetOption(s->decoder, DECODER_OPTION_PROFILE, &opt);
+    avctx->profile = opt;
+    (*s->decoder)->GetOption(s->decoder, DECODER_OPTION_LEVEL, &opt);
+    avctx->level = opt;
 #endif
 
     *got_frame = 1;
     return avpkt->size;
 }
 
-AVCodec ff_libopenh264_decoder = {
-    .name           = "libopenh264",
-    .long_name      = NULL_IF_CONFIG_SMALL("OpenH264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_H264,
+const FFCodec ff_libopenh264_decoder = {
+    .p.name         = "libopenh264",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("OpenH264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_H264,
     .priv_data_size = sizeof(SVCContext),
     .init           = svc_decode_init,
-    .decode         = svc_decode_frame,
+    FF_CODEC_DECODE_CB(svc_decode_frame),
     .close          = svc_decode_close,
-    // The decoder doesn't currently support B-frames, and the decoder's API
-    // doesn't support reordering/delay, but the BSF could incur delay.
-    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_DR1,
+    .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_DR1,
     .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS | FF_CODEC_CAP_INIT_THREADSAFE |
                       FF_CODEC_CAP_INIT_CLEANUP,
     .bsfs           = "h264_mp4toannexb",
+    .p.wrapper_name = "libopenh264",
 };

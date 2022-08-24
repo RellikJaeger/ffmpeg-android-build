@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+./configure --disable-x86asm
 
 chmod a+x build_android_*.sh
 
@@ -11,7 +12,6 @@ export COMMON_SET="--enable-static \
   --disable-txtpages \
   --disable-ffplay \
   --disable-ffmpeg \
-  --disable-ffserver \
   --disable-ffprobe \
   --disable-avdevice \
   --disable-bsfs \

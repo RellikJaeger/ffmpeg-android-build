@@ -20,7 +20,7 @@
 ;* Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 ;******************************************************************************
 
-%include "x86util.asm"
+%include "libavutil/x86/x86util.asm"
 
 SECTION_RODATA 32
 pd_reverse: dd 7, 6, 5, 4, 3, 2, 1, 0
@@ -56,6 +56,39 @@ VECTOR_FMUL
 %if HAVE_AVX_EXTERNAL
 INIT_YMM avx
 VECTOR_FMUL
+%endif
+
+;-----------------------------------------------------------------------------
+; void vector_dmul(double *dst, const double *src0, const double *src1, int len)
+;-----------------------------------------------------------------------------
+%macro VECTOR_DMUL 0
+cglobal vector_dmul, 4,4,4, dst, src0, src1, len
+    lea       lend, [lenq*8 - mmsize*4]
+ALIGN 16
+.loop:
+    movaps    m0,     [src0q + lenq + 0*mmsize]
+    movaps    m1,     [src0q + lenq + 1*mmsize]
+    movaps    m2,     [src0q + lenq + 2*mmsize]
+    movaps    m3,     [src0q + lenq + 3*mmsize]
+    mulpd     m0, m0, [src1q + lenq + 0*mmsize]
+    mulpd     m1, m1, [src1q + lenq + 1*mmsize]
+    mulpd     m2, m2, [src1q + lenq + 2*mmsize]
+    mulpd     m3, m3, [src1q + lenq + 3*mmsize]
+    movaps    [dstq + lenq + 0*mmsize], m0
+    movaps    [dstq + lenq + 1*mmsize], m1
+    movaps    [dstq + lenq + 2*mmsize], m2
+    movaps    [dstq + lenq + 3*mmsize], m3
+
+    sub       lenq, mmsize*4
+    jge       .loop
+    RET
+%endmacro
+
+INIT_XMM sse2
+VECTOR_DMUL
+%if HAVE_AVX_EXTERNAL
+INIT_YMM avx
+VECTOR_DMUL
 %endif
 
 ;------------------------------------------------------------------------------
@@ -261,7 +294,7 @@ VECTOR_DMUL_SCALAR
 ; vector_fmul_window(float *dst, const float *src0,
 ;                    const float *src1, const float *win, int len);
 ;-----------------------------------------------------------------------------
-%macro VECTOR_FMUL_WINDOW 0
+INIT_XMM sse
 cglobal vector_fmul_window, 5, 6, 6, dst, src0, src1, win, len, len1
     shl     lend, 2
     lea    len1q, [lenq - mmsize]
@@ -272,7 +305,6 @@ cglobal vector_fmul_window, 5, 6, 6, dst, src0, src1, win, len, len1
 .loop:
     mova      m0, [winq  + lenq]
     mova      m4, [src0q + lenq]
-%if cpuflag(sse)
     mova      m1, [winq  + len1q]
     mova      m5, [src1q + len1q]
     shufps    m1, m1, 0x1b
@@ -286,34 +318,12 @@ cglobal vector_fmul_window, 5, 6, 6, dst, src0, src1, win, len, len1
     addps     m2, m3
     subps     m1, m0
     shufps    m2, m2, 0x1b
-%else
-    pswapd    m1, [winq  + len1q]
-    pswapd    m5, [src1q + len1q]
-    mova      m2, m0
-    mova      m3, m1
-    pfmul     m2, m4
-    pfmul     m3, m5
-    pfmul     m1, m4
-    pfmul     m0, m5
-    pfadd     m2, m3
-    pfsub     m1, m0
-    pswapd    m2, m2
-%endif
     mova      [dstq + lenq], m1
     mova      [dstq + len1q], m2
     sub       len1q, mmsize
     add       lenq,  mmsize
     jl .loop
-%if mmsize == 8
-    femms
-%endif
     REP_RET
-%endmacro
-
-INIT_MMX 3dnowext
-VECTOR_FMUL_WINDOW
-INIT_XMM sse
-VECTOR_FMUL_WINDOW
 
 ;-----------------------------------------------------------------------------
 ; vector_fmul_add(float *dst, const float *src0, const float *src1,

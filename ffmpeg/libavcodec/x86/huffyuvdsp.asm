@@ -24,69 +24,13 @@
 
 SECTION .text
 
+%include "libavcodec/x86/huffyuvdsp_template.asm"
 
-%macro INT16_LOOP 2 ; %1 = a/u (aligned/unaligned), %2 = add/sub
-    movd    m4, maskd
-    SPLATW  m4, m4
-    add     wd, wd
-    test    wq, 2*mmsize - 1
-    jz %%.tomainloop
-    push  tmpq
-%%.wordloop:
-    sub     wq, 2
-%ifidn %2, add
-    mov   tmpw, [srcq+wq]
-    add   tmpw, [dstq+wq]
-%else
-    mov   tmpw, [src1q+wq]
-    sub   tmpw, [src2q+wq]
-%endif
-    and   tmpw, maskw
-    mov     [dstq+wq], tmpw
-    test    wq, 2*mmsize - 1
-    jnz %%.wordloop
-    pop   tmpq
-%%.tomainloop:
-%ifidn %2, add
-    add     srcq, wq
-%else
-    add     src1q, wq
-    add     src2q, wq
-%endif
-    add     dstq, wq
-    neg     wq
-    jz      %%.end
-%%.loop:
-%ifidn %2, add
-    mov%1   m0, [srcq+wq]
-    mov%1   m1, [dstq+wq]
-    mov%1   m2, [srcq+wq+mmsize]
-    mov%1   m3, [dstq+wq+mmsize]
-%else
-    mov%1   m0, [src1q+wq]
-    mov%1   m1, [src2q+wq]
-    mov%1   m2, [src1q+wq+mmsize]
-    mov%1   m3, [src2q+wq+mmsize]
-%endif
-    p%2w    m0, m1
-    p%2w    m2, m3
-    pand    m0, m4
-    pand    m2, m4
-    mov%1   [dstq+wq]       , m0
-    mov%1   [dstq+wq+mmsize], m2
-    add     wq, 2*mmsize
-    jl %%.loop
-%%.end:
-    RET
-%endmacro
+;------------------------------------------------------------------------------
+; void (*add_int16)(uint16_t *dst, const uint16_t *src, unsigned mask, int w);
+;------------------------------------------------------------------------------
 
-%if ARCH_X86_32
-INIT_MMX mmx
-cglobal add_int16, 4,4,5, dst, src, mask, w, tmp
-    INT16_LOOP a, add
-%endif
-
-INIT_XMM sse2
+%macro ADD_INT16 0
 cglobal add_int16, 4,4,5, dst, src, mask, w, tmp
     test srcq, mmsize-1
     jnz .unaligned
@@ -95,10 +39,19 @@ cglobal add_int16, 4,4,5, dst, src, mask, w, tmp
     INT16_LOOP a, add
 .unaligned:
     INT16_LOOP u, add
+%endmacro
+
+INIT_XMM sse2
+ADD_INT16
+
+%if HAVE_AVX2_EXTERNAL
+INIT_YMM avx2
+ADD_INT16
+%endif
 
 ; void add_hfyu_left_pred_bgr32(uint8_t *dst, const uint8_t *src,
 ;                               intptr_t w, uint8_t *left)
-%macro LEFT_BGR32 0
+INIT_XMM sse2
 cglobal add_hfyu_left_pred_bgr32, 4,4,3, dst, src, w, left
     shl           wq, 2
     movd          m0, [leftq]
@@ -109,17 +62,12 @@ cglobal add_hfyu_left_pred_bgr32, 4,4,3, dst, src, w, left
 .loop:
     movu          m1, [srcq+wq]
     mova          m2, m1
-%if mmsize == 8
-    punpckhdq     m0, m0
-%endif
     LSHIFT        m1, 4
     paddb         m1, m2
-%if mmsize == 16
     pshufd        m0, m0, q3333
     mova          m2, m1
     LSHIFT        m1, 8
     paddb         m1, m2
-%endif
     paddb         m0, m1
     movu   [dstq+wq], m0
     add           wq, mmsize
@@ -127,14 +75,7 @@ cglobal add_hfyu_left_pred_bgr32, 4,4,3, dst, src, w, left
     movd          m0, [dstq-4]
     movd     [leftq], m0
     REP_RET
-%endmacro
 
-%if ARCH_X86_32
-INIT_MMX mmx
-LEFT_BGR32
-%endif
-INIT_XMM sse2
-LEFT_BGR32
 
 ; void add_hfyu_median_prediction_mmxext(uint8_t *dst, const uint8_t *top, const uint8_t *diff, int mask, int w, int *left, int *left_top)
 INIT_MMX mmxext

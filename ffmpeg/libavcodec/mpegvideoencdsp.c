@@ -81,7 +81,7 @@ static int pix_sum_c(uint8_t *pix, int line_size)
 static int pix_norm1_c(uint8_t *pix, int line_size)
 {
     int s = 0, i, j;
-    uint32_t *sq = ff_square_tab + 256;
+    const uint32_t *sq = ff_square_tab + 256;
 
     for (i = 0; i < 16; i++) {
         for (j = 0; j < 16; j += 8) {
@@ -245,12 +245,13 @@ av_cold void ff_mpegvideoencdsp_init(MpegvideoEncDSPContext *c,
 
     c->draw_edges = draw_edges_8_c;
 
-    if (ARCH_ARM)
-        ff_mpegvideoencdsp_init_arm(c, avctx);
-    if (ARCH_PPC)
-        ff_mpegvideoencdsp_init_ppc(c, avctx);
-    if (ARCH_X86)
-        ff_mpegvideoencdsp_init_x86(c, avctx);
-    if (ARCH_MIPS)
-        ff_mpegvideoencdsp_init_mips(c, avctx);
+#if ARCH_ARM
+    ff_mpegvideoencdsp_init_arm(c, avctx);
+#elif ARCH_PPC
+    ff_mpegvideoencdsp_init_ppc(c, avctx);
+#elif ARCH_X86
+    ff_mpegvideoencdsp_init_x86(c, avctx);
+#elif ARCH_MIPS
+    ff_mpegvideoencdsp_init_mips(c, avctx);
+#endif
 }

@@ -29,6 +29,7 @@
 #include "libavutil/channel_layout.h"
 #include "libavutil/intreadwrite.h"
 #include "avformat.h"
+#include "demux.h"
 #include "internal.h"
 
 typedef struct BFIContext {
@@ -39,7 +40,7 @@ typedef struct BFIContext {
     int avflag;
 } BFIContext;
 
-static int bfi_probe(AVProbeData * p)
+static int bfi_probe(const AVProbeData * p)
 {
     /* Check file header */
     if (AV_RL32(p->buf) == MKTAG('B', 'F', '&', 'I'))
@@ -54,7 +55,7 @@ static int bfi_read_header(AVFormatContext * s)
     AVIOContext *pb = s->pb;
     AVStream *vstream;
     AVStream *astream;
-    int fps, chunk_header;
+    int ret, fps, chunk_header;
 
     /* Initialize the video codec... */
     vstream = avformat_new_stream(s, NULL);
@@ -69,7 +70,12 @@ static int bfi_read_header(AVFormatContext * s)
     /* Set the total number of frames. */
     avio_skip(pb, 8);
     chunk_header           = avio_rl32(pb);
+    if (chunk_header < 3)
+        return AVERROR_INVALIDDATA;
+
     bfi->nframes           = avio_rl32(pb);
+    if (bfi->nframes < 0)
+        return AVERROR_INVALIDDATA;
     avio_rl32(pb);
     avio_rl32(pb);
     avio_rl32(pb);
@@ -80,12 +86,9 @@ static int bfi_read_header(AVFormatContext * s)
 
     /*Load the palette to extradata */
     avio_skip(pb, 8);
-    vstream->codecpar->extradata      = av_malloc(768);
-    if (!vstream->codecpar->extradata)
-        return AVERROR(ENOMEM);
-    vstream->codecpar->extradata_size = 768;
-    avio_read(pb, vstream->codecpar->extradata,
-               vstream->codecpar->extradata_size);
+    ret = ff_get_extradata(s, vstream->codecpar, pb, 768);
+    if (ret < 0)
+        return ret;
 
     astream->codecpar->sample_rate = avio_rl32(pb);
     if (astream->codecpar->sample_rate <= 0) {
@@ -104,8 +107,7 @@ static int bfi_read_header(AVFormatContext * s)
     /* Set up the audio codec now... */
     astream->codecpar->codec_type      = AVMEDIA_TYPE_AUDIO;
     astream->codecpar->codec_id        = AV_CODEC_ID_PCM_U8;
-    astream->codecpar->channels        = 1;
-    astream->codecpar->channel_layout  = AV_CH_LAYOUT_MONO;
+    astream->codecpar->ch_layout       = (AVChannelLayout)AV_CHANNEL_LAYOUT_MONO;
     astream->codecpar->bits_per_coded_sample = 8;
     astream->codecpar->bit_rate        =
         (int64_t)astream->codecpar->sample_rate * astream->codecpar->bits_per_coded_sample;
@@ -138,12 +140,12 @@ static int bfi_read_packet(AVFormatContext * s, AVPacket * pkt)
         audio_offset    = avio_rl32(pb);
         avio_rl32(pb);
         video_offset    = avio_rl32(pb);
-        audio_size      = video_offset - audio_offset;
-        bfi->video_size = chunk_size - video_offset;
-        if (audio_size < 0 || bfi->video_size < 0) {
+        if (audio_offset < 0 || video_offset < audio_offset || chunk_size < video_offset) {
             av_log(s, AV_LOG_ERROR, "Invalid audio/video offsets or chunk size\n");
             return AVERROR_INVALIDDATA;
         }
+        audio_size      = video_offset - audio_offset;
+        bfi->video_size = chunk_size - video_offset;
 
         //Tossing an audio packet at the audio decoder.
         ret = av_get_packet(pb, pkt, audio_size);
@@ -174,7 +176,7 @@ static int bfi_read_packet(AVFormatContext * s, AVPacket * pkt)
     return ret;
 }
 
-AVInputFormat ff_bfi_demuxer = {
+const AVInputFormat ff_bfi_demuxer = {
     .name           = "bfi",
     .long_name      = NULL_IF_CONFIG_SMALL("Brute Force & Ignorance"),
     .priv_data_size = sizeof(BFIContext),

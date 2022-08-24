@@ -28,11 +28,13 @@
 
 #include "config.h"
 
+#include "libavutil/mem_internal.h"
+
 #include "mpegvideo.h"
 #include "dnxhddata.h"
 
 typedef struct RCCMPEntry {
-    uint16_t mb;
+    uint32_t mb;
     int value;
 } RCCMPEntry;
 
@@ -86,6 +88,8 @@ typedef struct DNXHDEncContext {
     unsigned frame_bits;
     uint8_t *src[3];
 
+    uint32_t *orig_vlc_codes;
+    uint8_t  *orig_vlc_bits;
     uint32_t *vlc_codes;
     uint8_t  *vlc_bits;
     uint16_t *run_codes;
@@ -96,7 +100,7 @@ typedef struct DNXHDEncContext {
     unsigned qscale;
     unsigned lambda;
 
-    uint16_t *mb_bits;
+    uint32_t *mb_bits;
     uint8_t  *mb_qscale;
 
     RCCMPEntry *mb_cmp;

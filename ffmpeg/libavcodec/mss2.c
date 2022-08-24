@@ -24,10 +24,12 @@
  */
 
 #include "libavutil/avassert.h"
+#include "codec_internal.h"
 #include "error_resilience.h"
 #include "internal.h"
 #include "mpeg_er.h"
-#include "msmpeg4.h"
+#include "mpegvideodec.h"
+#include "msmpeg4dec.h"
 #include "qpeldsp.h"
 #include "vc1.h"
 #include "wmv2data.h"
@@ -40,7 +42,6 @@ typedef struct MSS2Context {
     AVFrame       *last_pic;
     MSS12Context   c;
     MSS2DSPContext dsp;
-    QpelDSPContext qdsp;
     SliceContext   sc[2];
 } MSS2Context;
 
@@ -175,7 +176,7 @@ static int decode_pal_v2(MSS12Context *ctx, const uint8_t *buf, int buf_size)
     return 1 + ncol * 3;
 }
 
-static int decode_555(GetByteContext *gB, uint16_t *dst, ptrdiff_t stride,
+static int decode_555(AVCodecContext *avctx, GetByteContext *gB, uint16_t *dst, ptrdiff_t stride,
                       int keyframe, int w, int h)
 {
     int last_symbol = 0, repeat = 0, prev_avail = 0;
@@ -213,7 +214,7 @@ static int decode_555(GetByteContext *gB, uint16_t *dst, ptrdiff_t stride,
                     repeat = 0;
                     while (b-- > 130) {
                         if (repeat >= (INT_MAX >> 8) - 1) {
-                            av_log(NULL, AV_LOG_ERROR, "repeat overflow\n");
+                            av_log(avctx, AV_LOG_ERROR, "repeat overflow\n");
                             return AVERROR_INVALIDDATA;
                         }
                         repeat = (repeat << 8) + bytestream2_get_byte(gB) + 1;
@@ -412,8 +413,6 @@ static int decode_wmv9(AVCodecContext *avctx, const uint8_t *buf, int buf_size,
 
     ff_mpeg_er_frame_start(s);
 
-    v->bits = buf_size * 8;
-
     v->end_mb_x = (w + 15) >> 4;
     s->end_mb_y = (h + 15) >> 4;
     if (v->respic & 1)
@@ -465,28 +464,27 @@ static int decode_wmv9(AVCodecContext *avctx, const uint8_t *buf, int buf_size,
     return 0;
 }
 
-typedef struct Rectangle {
+struct Rectangle {
     int coded, x, y, w, h;
-} Rectangle;
+};
 
 #define MAX_WMV9_RECTANGLES 20
 #define ARITH2_PADDING 2
 
-static int mss2_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
-                             AVPacket *avpkt)
+static int mss2_decode_frame(AVCodecContext *avctx, AVFrame *frame,
+                             int *got_frame, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
     int buf_size       = avpkt->size;
     MSS2Context *ctx = avctx->priv_data;
     MSS12Context *c  = &ctx->c;
-    AVFrame *frame   = data;
     GetBitContext gb;
     GetByteContext gB;
     ArithCoder acoder;
 
     int keyframe, has_wmv9, has_mv, is_rle, is_555, ret;
 
-    Rectangle wmv9rects[MAX_WMV9_RECTANGLES], *r;
+    struct Rectangle wmv9rects[MAX_WMV9_RECTANGLES], *r;
     int used_rects = 0, i, implicit_rect = 0, av_uninit(wmv9_mask);
 
     if ((ret = init_get_bits8(&gb, buf, buf_size)) < 0)
@@ -618,7 +616,7 @@ static int mss2_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
             return AVERROR_INVALIDDATA;
         }
     } else {
-        if ((ret = ff_reget_buffer(avctx, ctx->last_pic)) < 0)
+        if ((ret = ff_reget_buffer(avctx, ctx->last_pic, 0)) < 0)
             return ret;
         if ((ret = av_frame_ref(frame, ctx->last_pic)) < 0)
             return ret;
@@ -635,7 +633,7 @@ static int mss2_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
     if (is_555) {
         bytestream2_init(&gB, buf, buf_size);
 
-        if (decode_555(&gB, (uint16_t *)c->rgb_pic, c->rgb_stride >> 1,
+        if (decode_555(avctx, &gB, (uint16_t *)c->rgb_pic, c->rgb_stride >> 1,
                        keyframe, avctx->width, avctx->height))
             return AVERROR_INVALIDDATA;
 
@@ -753,9 +751,7 @@ static av_cold int wmv9_init(AVCodecContext *avctx)
 
     v->s.avctx    = avctx;
 
-    if ((ret = ff_vc1_init_common(v)) < 0)
-        return ret;
-    ff_vc1dsp_init(&v->vc1dsp);
+    ff_vc1_init_common(v);
 
     v->profile = PROFILE_MAIN;
 
@@ -840,7 +836,6 @@ static av_cold int mss2_decode_init(AVCodecContext *avctx)
         return ret;
     }
     ff_mss2dsp_init(&ctx->dsp);
-    ff_qpeldsp_init(&ctx->qdsp);
 
     avctx->pix_fmt = c->free_colours == 127 ? AV_PIX_FMT_RGB555
                                             : AV_PIX_FMT_RGB24;
@@ -849,14 +844,15 @@ static av_cold int mss2_decode_init(AVCodecContext *avctx)
     return 0;
 }
 
-AVCodec ff_mss2_decoder = {
-    .name           = "mss2",
-    .long_name      = NULL_IF_CONFIG_SMALL("MS Windows Media Video V9 Screen"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_MSS2,
+const FFCodec ff_mss2_decoder = {
+    .p.name         = "mss2",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("MS Windows Media Video V9 Screen"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_MSS2,
     .priv_data_size = sizeof(MSS2Context),
     .init           = mss2_decode_init,
     .close          = mss2_decode_end,
-    .decode         = mss2_decode_frame,
-    .capabilities   = AV_CODEC_CAP_DR1,
+    FF_CODEC_DECODE_CB(mss2_decode_frame),
+    .p.capabilities = AV_CODEC_CAP_DR1,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

@@ -51,7 +51,7 @@ typedef struct TMVContext {
 #define PROBE_MAX_FPS         120
 #define PROBE_MIN_AUDIO_SIZE  (PROBE_MIN_SAMPLE_RATE / PROBE_MAX_FPS)
 
-static int tmv_probe(AVProbeData *p)
+static int tmv_probe(const AVProbeData *p)
 {
     if (AV_RL32(p->buf)   == TMV_TAG &&
         AV_RL16(p->buf+4) >= PROBE_MIN_SAMPLE_RATE &&
@@ -113,19 +113,13 @@ static int tmv_read_header(AVFormatContext *s)
 
     ast->codecpar->codec_type            = AVMEDIA_TYPE_AUDIO;
     ast->codecpar->codec_id              = AV_CODEC_ID_PCM_U8;
-    if (features & TMV_STEREO) {
-        ast->codecpar->channels       = 2;
-        ast->codecpar->channel_layout = AV_CH_LAYOUT_STEREO;
-    } else {
-        ast->codecpar->channels       = 1;
-        ast->codecpar->channel_layout = AV_CH_LAYOUT_MONO;
-    }
+    av_channel_layout_default(&ast->codecpar->ch_layout, !!(features & TMV_STEREO) + 1);
     ast->codecpar->bits_per_coded_sample = 8;
     ast->codecpar->bit_rate              = ast->codecpar->sample_rate *
                                            ast->codecpar->bits_per_coded_sample;
     avpriv_set_pts_info(ast, 32, 1, ast->codecpar->sample_rate);
 
-    fps.num = ast->codecpar->sample_rate * ast->codecpar->channels;
+    fps.num = ast->codecpar->sample_rate * ast->codecpar->ch_layout.nb_channels;
     fps.den = tmv->audio_chunk_size;
     av_reduce(&fps.num, &fps.den, fps.num, fps.den, 0xFFFFFFFFLL);
 
@@ -187,7 +181,7 @@ static int tmv_read_seek(AVFormatContext *s, int stream_index,
     return 0;
 }
 
-AVInputFormat ff_tmv_demuxer = {
+const AVInputFormat ff_tmv_demuxer = {
     .name           = "tmv",
     .long_name      = NULL_IF_CONFIG_SMALL("8088flex TMV"),
     .priv_data_size = sizeof(TMVContext),

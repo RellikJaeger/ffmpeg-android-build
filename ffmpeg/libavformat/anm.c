@@ -26,6 +26,7 @@
 
 #include "libavutil/intreadwrite.h"
 #include "avformat.h"
+#include "demux.h"
 #include "internal.h"
 
 typedef struct Page {
@@ -47,7 +48,7 @@ typedef struct AnmDemuxContext {
 #define LPF_TAG  MKTAG('L','P','F',' ')
 #define ANIM_TAG MKTAG('A','N','I','M')
 
-static int probe(AVProbeData *p)
+static int probe(const AVProbeData *p)
 {
     /* verify tags and video dimensions */
     if (AV_RL32(&p->buf[0])  == LPF_TAG &&
@@ -132,12 +133,7 @@ static int read_header(AVFormatContext *s)
     avio_skip(pb, 58);
 
     /* color cycling and palette data */
-    st->codecpar->extradata_size = 16*8 + 4*256;
-    st->codecpar->extradata      = av_mallocz(st->codecpar->extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
-    if (!st->codecpar->extradata) {
-        return AVERROR(ENOMEM);
-    }
-    ret = avio_read(pb, st->codecpar->extradata, st->codecpar->extradata_size);
+    ret = ff_get_extradata(s, st->codecpar, s->pb, 16*8 + 4*256);
     if (ret < 0)
         return ret;
 
@@ -219,7 +215,7 @@ repeat:
     return 0;
 }
 
-AVInputFormat ff_anm_demuxer = {
+const AVInputFormat ff_anm_demuxer = {
     .name           = "anm",
     .long_name      = NULL_IF_CONFIG_SMALL("Deluxe Paint Animation"),
     .priv_data_size = sizeof(AnmDemuxContext),

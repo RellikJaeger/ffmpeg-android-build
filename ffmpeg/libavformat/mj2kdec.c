@@ -19,12 +19,14 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config_components.h"
+
 #include "libavutil/intreadwrite.h"
 #include "avformat.h"
 #include "rawdec.h"
 
 #if CONFIG_MJPEG_2000_DEMUXER
-static int mjpeg2000_probe(AVProbeData *p)
+static int mjpeg2000_probe(const AVProbeData *p)
 {
     const uint8_t *b = p->buf;
     int i, marker, marker_size;

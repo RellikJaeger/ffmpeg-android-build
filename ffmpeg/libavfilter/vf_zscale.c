@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Paul B Mahol
+ * Copyright (c) 2022 Victoria Zhislina, Intel
  *
  * This file is part of FFmpeg.
  *
@@ -42,7 +43,10 @@
 #include "libavutil/parseutils.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/imgutils.h"
-#include "libavutil/avassert.h"
+
+#define ZIMG_ALIGNMENT 64
+#define MIN_TILESIZE 64
+#define MAX_THREADS 64
 
 static const char *const var_names[] = {
     "in_w",   "iw",
@@ -99,6 +103,8 @@ typedef struct ZScaleContext {
     char *size_str;
     double nominal_peak_luminance;
     int approximate_gamma;
+    double param_a;
+    double param_b;
 
     char *w_expr;               ///< width  expression string
     char *h_expr;               ///< height expression string
@@ -108,15 +114,24 @@ typedef struct ZScaleContext {
     int in_h_chr_pos;
     int in_v_chr_pos;
 
+    int first_time;
     int force_original_aspect_ratio;
 
-    void *tmp;
-    size_t tmp_size;
+    void *tmp[MAX_THREADS]; //separate for each thread;
+    int nb_threads;
+    int jobs_ret[MAX_THREADS];
+    double in_slice_start[MAX_THREADS];
+    double in_slice_end[MAX_THREADS];
+    int out_slice_start[MAX_THREADS];
+    int out_slice_end[MAX_THREADS];
 
     zimg_image_format src_format, dst_format;
     zimg_image_format alpha_src_format, alpha_dst_format;
+    zimg_image_format src_format_tmp, dst_format_tmp;
+    zimg_image_format alpha_src_format_tmp, alpha_dst_format_tmp;
     zimg_graph_builder_params alpha_params, params;
-    zimg_filter_graph *alpha_graph, *graph;
+    zimg_graph_builder_params alpha_params_tmp, params_tmp;
+    zimg_filter_graph *alpha_graph[MAX_THREADS], *graph[MAX_THREADS];
 
     enum AVColorSpace in_colorspace, out_colorspace;
     enum AVColorTransferCharacteristic in_trc, out_trc;
@@ -125,10 +140,29 @@ typedef struct ZScaleContext {
     enum AVChromaLocation in_chromal, out_chromal;
 } ZScaleContext;
 
-static av_cold int init_dict(AVFilterContext *ctx, AVDictionary **opts)
+typedef struct ThreadData {
+    const AVPixFmtDescriptor *desc, *odesc;
+    AVFrame *in, *out;
+} ThreadData;
+
+static av_cold int init(AVFilterContext *ctx)
 {
     ZScaleContext *s = ctx->priv;
     int ret;
+    zimg_image_format_default(&s->src_format, ZIMG_API_VERSION);
+    zimg_image_format_default(&s->dst_format, ZIMG_API_VERSION);
+    zimg_image_format_default(&s->src_format_tmp, ZIMG_API_VERSION);
+    zimg_image_format_default(&s->dst_format_tmp, ZIMG_API_VERSION);
+
+    zimg_image_format_default(&s->alpha_src_format, ZIMG_API_VERSION);
+    zimg_image_format_default(&s->alpha_dst_format, ZIMG_API_VERSION);
+    zimg_image_format_default(&s->alpha_src_format_tmp, ZIMG_API_VERSION);
+    zimg_image_format_default(&s->alpha_dst_format_tmp, ZIMG_API_VERSION);
+
+    zimg_graph_builder_params_default(&s->params, ZIMG_API_VERSION);
+    zimg_graph_builder_params_default(&s->params_tmp, ZIMG_API_VERSION);
+    zimg_graph_builder_params_default(&s->alpha_params, ZIMG_API_VERSION);
+    zimg_graph_builder_params_default(&s->alpha_params_tmp, ZIMG_API_VERSION);
 
     if (s->size_str && (s->w_expr || s->h_expr)) {
         av_log(ctx, AV_LOG_ERROR,
@@ -185,10 +219,25 @@ static int query_formats(AVFilterContext *ctx)
     };
     int ret;
 
-    ret = ff_formats_ref(ff_make_format_list(pixel_fmts), &ctx->inputs[0]->out_formats);
+    ret = ff_formats_ref(ff_make_format_list(pixel_fmts), &ctx->inputs[0]->outcfg.formats);
     if (ret < 0)
         return ret;
-    return ff_formats_ref(ff_make_format_list(pixel_fmts), &ctx->outputs[0]->in_formats);
+    return ff_formats_ref(ff_make_format_list(pixel_fmts), &ctx->outputs[0]->incfg.formats);
+}
+
+static void slice_params(ZScaleContext *s, int out_h, int in_h)
+{
+    s->out_slice_start[0] = 0;
+    for (int i = 1; i < s->nb_threads; i++) {
+        int slice_end = out_h * i / s->nb_threads;
+        s->out_slice_end[i - 1] = s->out_slice_start[i] = FFALIGN(slice_end, 2);
+    }
+    s->out_slice_end[s->nb_threads - 1] = out_h;
+
+    for (int i = 0; i < s->nb_threads; i++) {
+        s->in_slice_start[i] = s->out_slice_start[i] * in_h / (double)out_h;
+        s->in_slice_end[i]   = s->out_slice_end[i]   * in_h / (double)out_h;
+    }
 }
 
 static int config_props(AVFilterLink *outlink)
@@ -287,19 +336,14 @@ static int config_props(AVFilterLink *outlink)
     outlink->w = w;
     outlink->h = h;
 
-    if (inlink->w == outlink->w &&
-        inlink->h == outlink->h &&
-        inlink->format == outlink->format)
-        ;
-    else {
-    }
+    s->first_time = 1;
 
     if (inlink->sample_aspect_ratio.num){
         outlink->sample_aspect_ratio = av_mul_q((AVRational){outlink->h * inlink->w, outlink->w * inlink->h}, inlink->sample_aspect_ratio);
     } else
         outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
 
-    av_log(ctx, AV_LOG_VERBOSE, "w:%d h:%d fmt:%s sar:%d/%d -> w:%d h:%d fmt:%s sar:%d/%d\n",
+    av_log(ctx, AV_LOG_TRACE, "w:%d h:%d fmt:%s sar:%d/%d -> w:%d h:%d fmt:%s sar:%d/%d\n",
            inlink ->w, inlink ->h, av_get_pix_fmt_name( inlink->format),
            inlink->sample_aspect_ratio.num, inlink->sample_aspect_ratio.den,
            outlink->w, outlink->h, av_get_pix_fmt_name(outlink->format),
@@ -321,7 +365,7 @@ static int print_zimg_error(AVFilterContext *ctx)
 
     av_log(ctx, AV_LOG_ERROR, "code %d: %s\n", err_code, err_msg);
 
-    return err_code;
+    return AVERROR_EXTERNAL;
 }
 
 static int convert_chroma_location(enum AVChromaLocation chroma_location)
@@ -353,16 +397,26 @@ static int convert_matrix(enum AVColorSpace colorspace)
         return ZIMG_MATRIX_709;
     case AVCOL_SPC_UNSPECIFIED:
         return ZIMG_MATRIX_UNSPECIFIED;
+    case AVCOL_SPC_FCC:
+        return ZIMG_MATRIX_FCC;
     case AVCOL_SPC_BT470BG:
         return ZIMG_MATRIX_470BG;
     case AVCOL_SPC_SMPTE170M:
         return ZIMG_MATRIX_170M;
+    case AVCOL_SPC_SMPTE240M:
+        return ZIMG_MATRIX_240M;
     case AVCOL_SPC_YCGCO:
         return ZIMG_MATRIX_YCGCO;
     case AVCOL_SPC_BT2020_NCL:
         return ZIMG_MATRIX_2020_NCL;
     case AVCOL_SPC_BT2020_CL:
         return ZIMG_MATRIX_2020_CL;
+    case AVCOL_SPC_CHROMA_DERIVED_NCL:
+        return ZIMG_MATRIX_CHROMATICITY_DERIVED_NCL;
+    case AVCOL_SPC_CHROMA_DERIVED_CL:
+        return ZIMG_MATRIX_CHROMATICITY_DERIVED_CL;
+    case AVCOL_SPC_ICTCP:
+        return ZIMG_MATRIX_ICTCP;
     }
     return ZIMG_MATRIX_UNSPECIFIED;
 }
@@ -374,10 +428,22 @@ static int convert_trc(enum AVColorTransferCharacteristic color_trc)
         return ZIMG_TRANSFER_UNSPECIFIED;
     case AVCOL_TRC_BT709:
         return ZIMG_TRANSFER_709;
+    case AVCOL_TRC_GAMMA22:
+        return ZIMG_TRANSFER_470_M;
+    case AVCOL_TRC_GAMMA28:
+        return ZIMG_TRANSFER_470_BG;
     case AVCOL_TRC_SMPTE170M:
         return ZIMG_TRANSFER_601;
+    case AVCOL_TRC_SMPTE240M:
+        return ZIMG_TRANSFER_240M;
     case AVCOL_TRC_LINEAR:
         return ZIMG_TRANSFER_LINEAR;
+    case AVCOL_TRC_LOG:
+        return ZIMG_TRANSFER_LOG_100;
+    case AVCOL_TRC_LOG_SQRT:
+        return ZIMG_TRANSFER_LOG_316;
+    case AVCOL_TRC_IEC61966_2_4:
+        return ZIMG_TRANSFER_IEC_61966_2_4;
     case AVCOL_TRC_BT2020_10:
         return ZIMG_TRANSFER_2020_10;
     case AVCOL_TRC_BT2020_12:
@@ -399,14 +465,26 @@ static int convert_primaries(enum AVColorPrimaries color_primaries)
         return ZIMG_PRIMARIES_UNSPECIFIED;
     case AVCOL_PRI_BT709:
         return ZIMG_PRIMARIES_709;
+    case AVCOL_PRI_BT470M:
+        return ZIMG_PRIMARIES_470_M;
+    case AVCOL_PRI_BT470BG:
+        return ZIMG_PRIMARIES_470_BG;
     case AVCOL_PRI_SMPTE170M:
         return ZIMG_PRIMARIES_170M;
     case AVCOL_PRI_SMPTE240M:
         return ZIMG_PRIMARIES_240M;
+    case AVCOL_PRI_FILM:
+        return ZIMG_PRIMARIES_FILM;
     case AVCOL_PRI_BT2020:
         return ZIMG_PRIMARIES_2020;
+    case AVCOL_PRI_SMPTE428:
+        return ZIMG_PRIMARIES_ST428;
+    case AVCOL_PRI_SMPTE431:
+        return ZIMG_PRIMARIES_ST431_2;
     case AVCOL_PRI_SMPTE432:
         return ZIMG_PRIMARIES_ST432_1;
+    case AVCOL_PRI_JEDEC_P22:
+        return ZIMG_PRIMARIES_EBU3213_E;
     }
     return ZIMG_PRIMARIES_UNSPECIFIED;
 }
@@ -423,6 +501,62 @@ static int convert_range(enum AVColorRange color_range)
     return ZIMG_RANGE_LIMITED;
 }
 
+static enum AVColorRange convert_range_from_zimg(enum zimg_pixel_range_e color_range)
+{
+    switch (color_range) {
+    case ZIMG_RANGE_LIMITED:
+        return AVCOL_RANGE_MPEG;
+    case ZIMG_RANGE_FULL:
+        return AVCOL_RANGE_JPEG;
+    }
+    return AVCOL_RANGE_UNSPECIFIED;
+}
+
+/* returns 0 if image formats are the same and 1 otherwise */
+static int compare_zimg_image_formats(zimg_image_format *img_fmt0, zimg_image_format *img_fmt1)
+{
+    return ((img_fmt0->chroma_location != img_fmt1->chroma_location) ||
+#if ZIMG_API_VERSION >= 0x204
+        (img_fmt0->alpha != img_fmt1->alpha) ||
+#endif
+        (img_fmt0->color_family != img_fmt1->color_family) ||
+        (img_fmt0->color_primaries != img_fmt1->color_primaries) ||
+        (img_fmt0->depth != img_fmt1->depth) ||
+        (img_fmt0->field_parity != img_fmt1->field_parity) ||
+        (img_fmt0->height != img_fmt1->height) ||
+        (img_fmt0->matrix_coefficients != img_fmt1->matrix_coefficients) ||
+        (img_fmt0->pixel_range != img_fmt1->pixel_range) ||
+        (img_fmt0->pixel_type != img_fmt1->pixel_type) ||
+        (img_fmt0->subsample_h != img_fmt1->subsample_h) ||
+        (img_fmt0->subsample_w != img_fmt1->subsample_w) ||
+        (img_fmt0->transfer_characteristics != img_fmt1->transfer_characteristics) ||
+        (img_fmt0->width != img_fmt1->width));
+}
+
+/* returns 0 if graph builder parameters are the same and 1 otherwise */
+static int compare_zimg_graph_builder_params(zimg_graph_builder_params *parm0, zimg_graph_builder_params *parm1)
+{
+    /* the parameters that could be changed inside a single ffmpeg zscale invocation  are checked only
+    and NaN values that are default for some params are treated properly*/
+    int ret = (parm0->allow_approximate_gamma != parm1->allow_approximate_gamma) ||
+        (parm0->dither_type != parm1->dither_type) ||
+        (parm0->resample_filter != parm1->resample_filter) ||
+        (parm0->resample_filter_uv != parm1->resample_filter_uv);
+
+    if ((isnan(parm0->nominal_peak_luminance) == 0) || (isnan(parm1->nominal_peak_luminance) == 0))
+        ret = ret || (parm0->nominal_peak_luminance != parm1->nominal_peak_luminance);
+    if ((isnan(parm0->filter_param_a) == 0) || (isnan(parm1->filter_param_a) == 0))
+        ret = ret || (parm0->filter_param_a != parm1->filter_param_a);
+    if ((isnan(parm0->filter_param_a_uv) == 0) || (isnan(parm1->filter_param_a_uv) == 0))
+        ret = ret || (parm0->filter_param_a_uv != parm1->filter_param_a_uv);
+    if ((isnan(parm0->filter_param_b) == 0) || (isnan(parm1->filter_param_b) == 0))
+        ret = ret || (parm0->filter_param_b != parm1->filter_param_b);
+    if ((isnan(parm0->filter_param_b_uv) == 0) || (isnan(parm1->filter_param_b_uv) == 0))
+        ret = ret || (parm0->filter_param_b_uv != parm1->filter_param_b_uv);
+
+    return ret;
+}
+
 static void format_init(zimg_image_format *format, AVFrame *frame, const AVPixFmtDescriptor *desc,
                         int colorspace, int primaries, int transfer, int range, int location)
 {
@@ -435,74 +569,242 @@ static void format_init(zimg_image_format *format, AVFrame *frame, const AVPixFm
     format->color_family = (desc->flags & AV_PIX_FMT_FLAG_RGB) ? ZIMG_COLOR_RGB : ZIMG_COLOR_YUV;
     format->matrix_coefficients = (desc->flags & AV_PIX_FMT_FLAG_RGB) ? ZIMG_MATRIX_RGB : colorspace == -1 ? convert_matrix(frame->colorspace) : colorspace;
     format->color_primaries = primaries == -1 ? convert_primaries(frame->color_primaries) : primaries;
-    format->transfer_characteristics = transfer == - 1 ? convert_trc(frame->color_trc) : transfer;
+    format->transfer_characteristics = transfer == -1 ? convert_trc(frame->color_trc) : transfer;
     format->pixel_range = (desc->flags & AV_PIX_FMT_FLAG_RGB) ? ZIMG_RANGE_FULL : range == -1 ? convert_range(frame->color_range) : range;
     format->chroma_location = location == -1 ? convert_chroma_location(frame->chroma_location) : location;
 }
 
-static int graph_build(zimg_filter_graph **graph, zimg_graph_builder_params *params,
-                       zimg_image_format *src_format, zimg_image_format *dst_format,
-                       void **tmp, size_t *tmp_size)
+static int graphs_build(AVFrame *in, AVFrame *out, const AVPixFmtDescriptor *desc, const AVPixFmtDescriptor *out_desc,
+                        AVFilterContext *ctx, int job_nr, int n_jobs)
 {
+    ZScaleContext *s = ctx->priv;
     int ret;
     size_t size;
+    zimg_image_format src_format;
+    zimg_image_format dst_format;
+    zimg_image_format alpha_src_format;
+    zimg_image_format alpha_dst_format;
+    const double in_slice_start  = s->in_slice_start[job_nr];
+    const double in_slice_end    = s->in_slice_end[job_nr];
+    const int out_slice_start = s->out_slice_start[job_nr];
+    const int out_slice_end   = s->out_slice_end[job_nr];
 
-    zimg_filter_graph_free(*graph);
-    *graph = zimg_filter_graph_build(src_format, dst_format, params);
-    if (!*graph)
-        return print_zimg_error(NULL);
+    src_format = s->src_format;
+    dst_format = s->dst_format;
+    /* The input slice is specified through the active_region field,
+    unlike the output slice.
+    according to zimg requirements input and output slices should have even dimensions */
+    src_format.active_region.width = in->width;
+    src_format.active_region.height = in_slice_end - in_slice_start;
+    src_format.active_region.left = 0;
+    src_format.active_region.top = in_slice_start;
+    //dst now is the single tile only!!
+    dst_format.width = out->width;
+    dst_format.height = out_slice_end - out_slice_start;
 
-    ret = zimg_filter_graph_get_tmp_size(*graph, &size);
+    if (s->graph[job_nr]) {
+        zimg_filter_graph_free(s->graph[job_nr]);
+    }
+    s->graph[job_nr] = zimg_filter_graph_build(&src_format, &dst_format, &s->params);
+    if (!s->graph[job_nr])
+        return print_zimg_error(ctx);
+
+    ret = zimg_filter_graph_get_tmp_size(s->graph[job_nr], &size);
     if (ret)
-        return print_zimg_error(NULL);
+        return print_zimg_error(ctx);
 
-    if (size > *tmp_size) {
-        av_freep(tmp);
-        *tmp = av_malloc(size);
-        if (!*tmp)
-            return AVERROR(ENOMEM);
+    if (s->tmp[job_nr])
+        av_freep(&s->tmp[job_nr]);
+    s->tmp[job_nr] = av_calloc(size, 1);
+    if (!s->tmp[job_nr])
+        return AVERROR(ENOMEM);
 
-        *tmp_size = size;
+    if (desc->flags & AV_PIX_FMT_FLAG_ALPHA && out_desc->flags & AV_PIX_FMT_FLAG_ALPHA) {
+        alpha_src_format = s->alpha_src_format;
+        alpha_dst_format = s->alpha_dst_format;
+        /* The input slice is specified through the active_region field, unlike the output slice.
+        according to zimg requirements input and output slices should have even dimentions */
+        alpha_src_format.active_region.width = in->width;
+        alpha_src_format.active_region.height = in_slice_end - in_slice_start;
+        alpha_src_format.active_region.left = 0;
+        alpha_src_format.active_region.top = in_slice_start;
+        //dst now is the single tile only!!
+        alpha_dst_format.width = out->width;
+        alpha_dst_format.height = out_slice_end - out_slice_start;
+
+        if (s->alpha_graph[job_nr]) {
+            zimg_filter_graph_free(s->alpha_graph[job_nr]);
+        }
+        s->alpha_graph[job_nr] = zimg_filter_graph_build(&alpha_src_format, &alpha_dst_format, &s->alpha_params);
+        if (!s->alpha_graph[job_nr])
+            return print_zimg_error(ctx);
+    }
+    return 0;
+}
+
+static int realign_frame(const AVPixFmtDescriptor *desc, AVFrame **frame, int needs_copy)
+{
+    AVFrame *aligned = NULL;
+    int ret = 0, plane, planes;
+
+    /* Realign any unaligned input frame. */
+    planes = av_pix_fmt_count_planes(desc->nb_components);
+    for (plane = 0; plane < planes; plane++) {
+        int p = desc->comp[plane].plane;
+        if ((uintptr_t)(*frame)->data[p] % ZIMG_ALIGNMENT || (*frame)->linesize[p] % ZIMG_ALIGNMENT) {
+            if (!(aligned = av_frame_alloc())) {
+                ret = AVERROR(ENOMEM);
+                goto fail;
+            }
+
+            aligned->format = (*frame)->format;
+            aligned->width  = (*frame)->width;
+            aligned->height = (*frame)->height;
+
+            if ((ret = av_frame_get_buffer(aligned, ZIMG_ALIGNMENT)) < 0)
+                goto fail;
+
+            if (needs_copy && (ret = av_frame_copy(aligned, *frame)) < 0)
+                goto fail;
+
+            if (needs_copy && (ret = av_frame_copy_props(aligned, *frame)) < 0)
+                goto fail;
+
+            av_frame_free(frame);
+            *frame = aligned;
+            return 0;
+        }
     }
 
+fail:
+    av_frame_free(&aligned);
+    return ret;
+}
+
+static void update_output_color_information(ZScaleContext *s, AVFrame *frame)
+{
+    if (s->colorspace != -1)
+        frame->colorspace = (int)s->dst_format.matrix_coefficients;
+
+    if (s->primaries != -1)
+        frame->color_primaries = (int)s->dst_format.color_primaries;
+
+    if (s->range != -1)
+        frame->color_range = convert_range_from_zimg(s->dst_format.pixel_range);
+
+    if (s->trc != -1)
+        frame->color_trc = (int)s->dst_format.transfer_characteristics;
+
+    if (s->chromal != -1)
+        frame->chroma_location = (int)s->dst_format.chroma_location + 1;
+}
+
+static int filter_slice(AVFilterContext *ctx, void *data, int job_nr, int n_jobs)
+{
+    ThreadData *td = data;
+    int ret = 0;
+    int p;
+    int need_gb;
+    ZScaleContext *s = ctx->priv;
+    zimg_image_buffer_const src_buf = { ZIMG_API_VERSION };
+    zimg_image_buffer dst_buf = { ZIMG_API_VERSION };
+    const int out_slice_start = s->out_slice_start[job_nr];
+
+    /* create zimg filter graphs for each thread
+     only if not created earlier or there is some change in frame parameters */
+    need_gb = compare_zimg_image_formats(&s->src_format, &s->src_format_tmp) ||
+        compare_zimg_image_formats(&s->dst_format, &s->dst_format_tmp) ||
+        compare_zimg_graph_builder_params(&s->params, &s->params_tmp);
+    if(td->desc->flags & AV_PIX_FMT_FLAG_ALPHA && td->odesc->flags & AV_PIX_FMT_FLAG_ALPHA)
+        need_gb = need_gb || compare_zimg_image_formats(&s->alpha_src_format, &s->alpha_src_format_tmp) ||
+            compare_zimg_image_formats(&s->alpha_dst_format, &s->alpha_dst_format_tmp) ||
+            compare_zimg_graph_builder_params(&s->alpha_params, &s->alpha_params_tmp);
+
+    if (need_gb){
+        ret = graphs_build(td->in, td->out, td->desc, td->odesc, ctx, job_nr, n_jobs);
+        if (ret < 0)
+            return print_zimg_error(ctx);
+    }
+    for (int i = 0; i < 3; i++) {
+        const int vsamp = i >= 1 ? td->odesc->log2_chroma_h : 0;
+
+        p = td->desc->comp[i].plane;
+
+        src_buf.plane[i].data = td->in->data[p];
+        src_buf.plane[i].stride = td->in->linesize[p];
+        src_buf.plane[i].mask = -1;
+
+        p = td->odesc->comp[i].plane;
+        dst_buf.plane[i].data = td->out->data[p] + td->out->linesize[p] * (out_slice_start >> vsamp);
+        dst_buf.plane[i].stride = td->out->linesize[p];
+        dst_buf.plane[i].mask = -1;
+    }
+    if (!s->graph[job_nr])
+        return AVERROR(EINVAL);
+    ret = zimg_filter_graph_process(s->graph[job_nr], &src_buf, &dst_buf, s->tmp[job_nr], 0, 0, 0, 0);
+    if (ret)
+        return print_zimg_error(ctx);
+
+    if (td->desc->flags & AV_PIX_FMT_FLAG_ALPHA && td->odesc->flags & AV_PIX_FMT_FLAG_ALPHA) {
+        src_buf.plane[0].data = td->in->data[3];
+        src_buf.plane[0].stride = td->in->linesize[3];
+        src_buf.plane[0].mask = -1;
+
+        dst_buf.plane[0].data = td->out->data[3] + td->out->linesize[3] * out_slice_start;
+        dst_buf.plane[0].stride = td->out->linesize[3];
+        dst_buf.plane[0].mask = -1;
+
+        if (!s->alpha_graph[job_nr])
+            return AVERROR(EINVAL);
+        ret = zimg_filter_graph_process(s->alpha_graph[job_nr], &src_buf, &dst_buf, s->tmp[job_nr], 0, 0, 0, 0);
+        if (ret)
+            return print_zimg_error(ctx);
+    }
     return 0;
 }
 
 static int filter_frame(AVFilterLink *link, AVFrame *in)
 {
-    ZScaleContext *s = link->dst->priv;
-    AVFilterLink *outlink = link->dst->outputs[0];
+    AVFilterContext *ctx = link->dst;
+    ZScaleContext *s = ctx->priv;
+    AVFilterLink *outlink = ctx->outputs[0];
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(link->format);
     const AVPixFmtDescriptor *odesc = av_pix_fmt_desc_get(outlink->format);
-    zimg_image_buffer_const src_buf = { ZIMG_API_VERSION };
-    zimg_image_buffer dst_buf = { ZIMG_API_VERSION };
     char buf[32];
-    int ret = 0, plane;
-    AVFrame *out;
+    int ret = 0;
+    AVFrame *out = NULL;
+    ThreadData td;
 
-    out = ff_get_video_buffer(outlink, outlink->w, outlink->h);
-    if (!out) {
-        av_frame_free(&in);
-        return AVERROR(ENOMEM);
-    }
+    //we need to use this filter if something is different for an input and output only
+    //otherwise - just copy the input frame to the output
+    if ((link->format != outlink->format) ||
+        (link->w != outlink->w) ||
+        (link->h != outlink->h) ||
+        s->first_time ||
+        (s->src_format.chroma_location != s->dst_format.chroma_location) ||
+        (s->src_format.color_family !=s->dst_format.color_family) ||
+        (s->src_format.color_primaries !=s->dst_format.color_primaries) ||
+        (s->src_format.depth !=s->dst_format.depth) ||
+        (s->src_format.matrix_coefficients !=s->dst_format.matrix_coefficients) ||
+        (s->src_format.field_parity !=s->dst_format.field_parity) ||
+        (s->src_format.pixel_range !=s->dst_format.pixel_range) ||
+        (s->src_format.pixel_type !=s->dst_format.pixel_type) ||
+        (s->src_format.transfer_characteristics !=s->dst_format.transfer_characteristics)
+    ){
+        out = ff_get_video_buffer(outlink, outlink->w, outlink->h);
+        if (!out) {
+            ret =  AVERROR(ENOMEM);
+            goto fail;
+        }
 
-    av_frame_copy_props(out, in);
-    out->width  = outlink->w;
-    out->height = outlink->h;
+        if ((ret = realign_frame(odesc, &out, 0)) < 0)
+            goto fail;
 
-    if(   in->width  != link->w
-       || in->height != link->h
-       || in->format != link->format
-       || s->in_colorspace != in->colorspace
-       || s->in_trc  != in->color_trc
-       || s->in_primaries != in->color_primaries
-       || s->in_range != in->color_range
-       || s->out_colorspace != out->colorspace
-       || s->out_trc  != out->color_trc
-       || s->out_primaries != out->color_primaries
-       || s->out_range != out->color_range
-       || s->in_chromal != in->chroma_location
-       || s->out_chromal != out->chroma_location) {
+        av_frame_copy_props(out, in);
+
+        if ((ret = realign_frame(desc, &in, 1)) < 0)
+            goto fail;
+
         snprintf(buf, sizeof(buf)-1, "%d", outlink->w);
         av_opt_set(s, "w", buf, 0);
         snprintf(buf, sizeof(buf)-1, "%d", outlink->h);
@@ -512,56 +814,36 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
         link->dst->inputs[0]->w      = in->width;
         link->dst->inputs[0]->h      = in->height;
 
-        if ((ret = config_props(outlink)) < 0) {
-            av_frame_free(&in);
-            av_frame_free(&out);
-            return ret;
-        }
+        s->nb_threads = av_clip(FFMIN(ff_filter_get_nb_threads(ctx), FFMIN(link->h, outlink->h) / MIN_TILESIZE), 1, MAX_THREADS);
+        s->in_colorspace = in->colorspace;
+        s->in_trc = in->color_trc;
+        s->in_primaries = in->color_primaries;
+        s->in_range = in->color_range;
+        s->out_colorspace = out->colorspace;
+        s->out_trc = out->color_trc;
+        s->out_primaries = out->color_primaries;
+        s->out_range = out->color_range;
+
+        slice_params(s, out->height, in->height);
 
         zimg_image_format_default(&s->src_format, ZIMG_API_VERSION);
         zimg_image_format_default(&s->dst_format, ZIMG_API_VERSION);
         zimg_graph_builder_params_default(&s->params, ZIMG_API_VERSION);
 
+        format_init(&s->src_format, in, desc, s->colorspace_in,
+            s->primaries_in, s->trc_in, s->range_in, s->chromal_in);
+        format_init(&s->dst_format, out, odesc, s->colorspace,
+            s->primaries, s->trc, s->range, s->chromal);
+        s->first_time = 0;
+
         s->params.dither_type = s->dither;
-        s->params.cpu_type = ZIMG_CPU_AUTO;
+        s->params.cpu_type = ZIMG_CPU_AUTO_64B;
         s->params.resample_filter = s->filter;
         s->params.resample_filter_uv = s->filter;
         s->params.nominal_peak_luminance = s->nominal_peak_luminance;
         s->params.allow_approximate_gamma = s->approximate_gamma;
-
-        format_init(&s->src_format, in, desc, s->colorspace_in,
-                    s->primaries_in, s->trc_in, s->range_in, s->chromal_in);
-        format_init(&s->dst_format, out, odesc, s->colorspace,
-                    s->primaries, s->trc, s->range, s->chromal);
-
-        if (s->colorspace != -1)
-            out->colorspace = (int)s->dst_format.matrix_coefficients;
-
-        if (s->primaries != -1)
-            out->color_primaries = (int)s->dst_format.color_primaries;
-
-        if (s->range != -1)
-            out->color_range = (int)s->dst_format.pixel_range + 1;
-
-        if (s->trc != -1)
-            out->color_trc = (int)s->dst_format.transfer_characteristics;
-
-        if (s->chromal != -1)
-            out->chroma_location = (int)s->dst_format.chroma_location - 1;
-
-        ret = graph_build(&s->graph, &s->params, &s->src_format, &s->dst_format,
-                          &s->tmp, &s->tmp_size);
-        if (ret < 0)
-            goto fail;
-
-        s->in_colorspace  = in->colorspace;
-        s->in_trc         = in->color_trc;
-        s->in_primaries   = in->color_primaries;
-        s->in_range       = in->color_range;
-        s->out_colorspace = out->colorspace;
-        s->out_trc        = out->color_trc;
-        s->out_primaries  = out->color_primaries;
-        s->out_range      = out->color_range;
+        s->params.filter_param_a = s->params.filter_param_a_uv = s->param_a;
+        s->params.filter_param_b = s->params.filter_param_b_uv = s->param_b;
 
         if (desc->flags & AV_PIX_FMT_FLAG_ALPHA && odesc->flags & AV_PIX_FMT_FLAG_ALPHA) {
             zimg_image_format_default(&s->alpha_src_format, ZIMG_API_VERSION);
@@ -569,7 +851,7 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
             zimg_graph_builder_params_default(&s->alpha_params, ZIMG_API_VERSION);
 
             s->alpha_params.dither_type = s->dither;
-            s->alpha_params.cpu_type = ZIMG_CPU_AUTO;
+            s->alpha_params.cpu_type = ZIMG_CPU_AUTO_64B;
             s->alpha_params.resample_filter = s->filter;
 
             s->alpha_src_format.width = in->width;
@@ -578,86 +860,60 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
             s->alpha_src_format.pixel_type = (desc->flags & AV_PIX_FMT_FLAG_FLOAT) ? ZIMG_PIXEL_FLOAT : desc->comp[0].depth > 8 ? ZIMG_PIXEL_WORD : ZIMG_PIXEL_BYTE;
             s->alpha_src_format.color_family = ZIMG_COLOR_GREY;
 
-            s->alpha_dst_format.width = out->width;
-            s->alpha_dst_format.height = out->height;
             s->alpha_dst_format.depth = odesc->comp[0].depth;
-            s->alpha_dst_format.pixel_type = (desc->flags & AV_PIX_FMT_FLAG_FLOAT) ? ZIMG_PIXEL_FLOAT : odesc->comp[0].depth > 8 ? ZIMG_PIXEL_WORD : ZIMG_PIXEL_BYTE;
+            s->alpha_dst_format.pixel_type = (odesc->flags & AV_PIX_FMT_FLAG_FLOAT) ? ZIMG_PIXEL_FLOAT : odesc->comp[0].depth > 8 ? ZIMG_PIXEL_WORD : ZIMG_PIXEL_BYTE;
             s->alpha_dst_format.color_family = ZIMG_COLOR_GREY;
-
-            zimg_filter_graph_free(s->alpha_graph);
-            s->alpha_graph = zimg_filter_graph_build(&s->alpha_src_format, &s->alpha_dst_format, &s->alpha_params);
-            if (!s->alpha_graph) {
-                ret = print_zimg_error(link->dst);
-                goto fail;
-            }
         }
-    }
 
-    if (s->colorspace != -1)
-        out->colorspace = (int)s->dst_format.matrix_coefficients;
+        update_output_color_information(s, out);
+        av_reduce(&out->sample_aspect_ratio.num, &out->sample_aspect_ratio.den,
+                  (int64_t)in->sample_aspect_ratio.num * outlink->h * link->w,
+                  (int64_t)in->sample_aspect_ratio.den * outlink->w * link->h,
+                  INT_MAX);
 
-    if (s->primaries != -1)
-        out->color_primaries = (int)s->dst_format.color_primaries;
+        td.in = in;
+        td.out = out;
+        td.desc = desc;
+        td.odesc = odesc;
 
-    if (s->range != -1)
-        out->color_range = (int)s->dst_format.pixel_range;
-
-    if (s->trc != -1)
-        out->color_trc = (int)s->dst_format.transfer_characteristics;
-
-    av_reduce(&out->sample_aspect_ratio.num, &out->sample_aspect_ratio.den,
-              (int64_t)in->sample_aspect_ratio.num * outlink->h * link->w,
-              (int64_t)in->sample_aspect_ratio.den * outlink->w * link->h,
-              INT_MAX);
-
-    for (plane = 0; plane < 3; plane++) {
-        int p = desc->comp[plane].plane;
-        src_buf.plane[plane].data   = in->data[p];
-        src_buf.plane[plane].stride = in->linesize[p];
-        src_buf.plane[plane].mask   = -1;
-
-        p = odesc->comp[plane].plane;
-        dst_buf.plane[plane].data   = out->data[p];
-        dst_buf.plane[plane].stride = out->linesize[p];
-        dst_buf.plane[plane].mask   = -1;
-    }
-
-    ret = zimg_filter_graph_process(s->graph, &src_buf, &dst_buf, s->tmp, 0, 0, 0, 0);
-    if (ret) {
-        print_zimg_error(link->dst);
-        goto fail;
-    }
-
-    if (desc->flags & AV_PIX_FMT_FLAG_ALPHA && odesc->flags & AV_PIX_FMT_FLAG_ALPHA) {
-        src_buf.plane[0].data   = in->data[3];
-        src_buf.plane[0].stride = in->linesize[3];
-        src_buf.plane[0].mask   = -1;
-
-        dst_buf.plane[0].data   = out->data[3];
-        dst_buf.plane[0].stride = out->linesize[3];
-        dst_buf.plane[0].mask   = -1;
-
-        ret = zimg_filter_graph_process(s->alpha_graph, &src_buf, &dst_buf, s->tmp, 0, 0, 0, 0);
-        if (ret) {
-            print_zimg_error(link->dst);
-            goto fail;
+        memset(s->jobs_ret, 0, s->nb_threads * sizeof(*s->jobs_ret));
+        ret = ff_filter_execute(ctx, filter_slice, &td, s->jobs_ret, s->nb_threads);
+        for (int i = 0; ret >= 0 && i < s->nb_threads; i++)
+            if (s->jobs_ret[i] < 0)
+                ret = s->jobs_ret[i];
+        if (ret < 0) {
+            av_frame_free(&in);
+            av_frame_free(&out);
+            return ret;
         }
-    } else if (odesc->flags & AV_PIX_FMT_FLAG_ALPHA) {
-        int x, y;
 
-        if (odesc->flags & AV_PIX_FMT_FLAG_FLOAT) {
-            for (y = 0; y < out->height; y++) {
-                for (x = 0; x < out->width; x++) {
-                    AV_WN32(out->data[3] + x * odesc->comp[3].step + y * out->linesize[3],
-                            av_float2int(1.0f));
+        s->src_format_tmp = s->src_format;
+        s->dst_format_tmp = s->dst_format;
+        s->params_tmp = s->params;
+        if (desc->flags & AV_PIX_FMT_FLAG_ALPHA && odesc->flags & AV_PIX_FMT_FLAG_ALPHA) {
+            s->alpha_src_format_tmp = s->alpha_src_format;
+            s->alpha_dst_format_tmp = s->alpha_dst_format;
+            s->alpha_params_tmp = s->alpha_params;
+        }
+
+        if ((!(desc->flags & AV_PIX_FMT_FLAG_ALPHA)) && (odesc->flags & AV_PIX_FMT_FLAG_ALPHA) ){
+            int x, y;
+            if (odesc->flags & AV_PIX_FMT_FLAG_FLOAT) {
+                for (y = 0; y < out->height; y++) {
+                    for (x = 0; x < out->width; x++) {
+                        AV_WN32(out->data[3] + x * odesc->comp[3].step + y * out->linesize[3],
+                                av_float2int(1.0f));
+                    }
                 }
+            } else {
+                for (y = 0; y < outlink->h; y++)
+                    memset(out->data[3] + y * out->linesize[3], 0xff, outlink->w);
             }
-        } else {
-            for (y = 0; y < outlink->h; y++)
-                memset(out->data[3] + y * out->linesize[3], 0xff, outlink->w);
         }
+    } else {
+        /*no need for any filtering */
+        return ff_filter_frame(outlink, in);
     }
-
 fail:
     av_frame_free(&in);
     if (ret) {
@@ -668,13 +924,21 @@ fail:
     return ff_filter_frame(outlink, out);
 }
 
-static void uninit(AVFilterContext *ctx)
+static av_cold void uninit(AVFilterContext *ctx)
 {
     ZScaleContext *s = ctx->priv;
 
-    zimg_filter_graph_free(s->graph);
-    av_freep(&s->tmp);
-    s->tmp_size = 0;
+    for (int i = 0; i < s->nb_threads; i++) {
+        av_freep(&s->tmp[i]);
+        if (s->graph[i]) {
+            zimg_filter_graph_free(s->graph[i]);
+            s->graph[i] = NULL;
+        }
+        if (s->alpha_graph[i]) {
+            zimg_filter_graph_free(s->alpha_graph[i]);
+            s->alpha_graph[i] = NULL;
+        }
+    }
 }
 
 static int process_command(AVFilterContext *ctx, const char *cmd, const char *args,
@@ -703,12 +967,13 @@ static int process_command(AVFilterContext *ctx, const char *cmd, const char *ar
 
 #define OFFSET(x) offsetof(ZScaleContext, x)
 #define FLAGS AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_FILTERING_PARAM
+#define TFLAGS AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_RUNTIME_PARAM
 
 static const AVOption zscale_options[] = {
-    { "w",      "Output video width",  OFFSET(w_expr),    AV_OPT_TYPE_STRING, .flags = FLAGS },
-    { "width",  "Output video width",  OFFSET(w_expr),    AV_OPT_TYPE_STRING, .flags = FLAGS },
-    { "h",      "Output video height", OFFSET(h_expr),    AV_OPT_TYPE_STRING, .flags = FLAGS },
-    { "height", "Output video height", OFFSET(h_expr),    AV_OPT_TYPE_STRING, .flags = FLAGS },
+    { "w",      "Output video width",  OFFSET(w_expr),    AV_OPT_TYPE_STRING, .flags = TFLAGS },
+    { "width",  "Output video width",  OFFSET(w_expr),    AV_OPT_TYPE_STRING, .flags = TFLAGS },
+    { "h",      "Output video height", OFFSET(h_expr),    AV_OPT_TYPE_STRING, .flags = TFLAGS },
+    { "height", "Output video height", OFFSET(h_expr),    AV_OPT_TYPE_STRING, .flags = TFLAGS },
     { "size",   "set video size",      OFFSET(size_str),  AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, FLAGS },
     { "s",      "set video size",      OFFSET(size_str),  AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, FLAGS },
     { "dither", "set dither type",     OFFSET(dither),    AV_OPT_TYPE_INT, {.i64 = 0}, 0, ZIMG_DITHER_ERROR_DIFFUSION, FLAGS, "dither" },
@@ -734,8 +999,8 @@ static const AVOption zscale_options[] = {
     {     "unknown",          0,       0,                 AV_OPT_TYPE_CONST, {.i64 = -1},                 0, 0, FLAGS, "range" },
     {     "tv",               0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_RANGE_LIMITED}, 0, 0, FLAGS, "range" },
     {     "pc",               0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_RANGE_FULL},    0, 0, FLAGS, "range" },
-    { "primaries", "set color primaries", OFFSET(primaries), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_PRIMARIES_ST432_1, FLAGS, "primaries" },
-    { "p",         "set color primaries", OFFSET(primaries), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_PRIMARIES_ST432_1, FLAGS, "primaries" },
+    { "primaries", "set color primaries", OFFSET(primaries), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, FLAGS, "primaries" },
+    { "p",         "set color primaries", OFFSET(primaries), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, FLAGS, "primaries" },
     {     "input",            0,       0,                 AV_OPT_TYPE_CONST, {.i64 = -1},                         0, 0, FLAGS, "primaries" },
     {     "709",              0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_709},         0, 0, FLAGS, "primaries" },
     {     "unspecified",      0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_UNSPECIFIED}, 0, 0, FLAGS, "primaries" },
@@ -744,12 +1009,19 @@ static const AVOption zscale_options[] = {
     {     "2020",             0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_2020},        0, 0, FLAGS, "primaries" },
     {     "unknown",          0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_UNSPECIFIED}, 0, 0, FLAGS, "primaries" },
     {     "bt709",            0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_709},         0, 0, FLAGS, "primaries" },
+    {     "bt470m",           0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_470_M},       0, 0, FLAGS, "primaries" },
+    {     "bt470bg",          0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_470_BG},      0, 0, FLAGS, "primaries" },
     {     "smpte170m",        0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_170M},        0, 0, FLAGS, "primaries" },
     {     "smpte240m",        0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_240M},        0, 0, FLAGS, "primaries" },
+    {     "film",             0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_FILM},        0, 0, FLAGS, "primaries" },
     {     "bt2020",           0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_2020},        0, 0, FLAGS, "primaries" },
+    {     "smpte428",         0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_ST428},       0, 0, FLAGS, "primaries" },
+    {     "smpte431",         0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_ST431_2},     0, 0, FLAGS, "primaries" },
     {     "smpte432",         0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_ST432_1},     0, 0, FLAGS, "primaries" },
-    { "transfer", "set transfer characteristic", OFFSET(trc), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_TRANSFER_ARIB_B67, FLAGS, "transfer" },
-    { "t",        "set transfer characteristic", OFFSET(trc), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_TRANSFER_ARIB_B67, FLAGS, "transfer" },
+    {     "jedec-p22",        0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_EBU3213_E},   0, 0, FLAGS, "primaries" },
+    {     "ebu3213",          0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_PRIMARIES_EBU3213_E},   0, 0, FLAGS, "primaries" },
+    { "transfer", "set transfer characteristic", OFFSET(trc), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, FLAGS, "transfer" },
+    { "t",        "set transfer characteristic", OFFSET(trc), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, FLAGS, "transfer" },
     {     "input",            0,       0,                 AV_OPT_TYPE_CONST, {.i64 = -1},                         0, 0, FLAGS, "transfer" },
     {     "709",              0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_709},         0, 0, FLAGS, "transfer" },
     {     "unspecified",      0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_UNSPECIFIED}, 0, 0, FLAGS, "transfer" },
@@ -758,16 +1030,21 @@ static const AVOption zscale_options[] = {
     {     "2020_10",          0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_2020_10},     0, 0, FLAGS, "transfer" },
     {     "2020_12",          0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_2020_12},     0, 0, FLAGS, "transfer" },
     {     "unknown",          0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_UNSPECIFIED}, 0, 0, FLAGS, "transfer" },
+    {     "bt470m",           0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_470_M},       0, 0, FLAGS, "transfer" },
+    {     "bt470bg",          0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_470_BG},      0, 0, FLAGS, "transfer" },
     {     "smpte170m",        0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_601},         0, 0, FLAGS, "transfer" },
     {     "bt709",            0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_709},         0, 0, FLAGS, "transfer" },
     {     "linear",           0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_LINEAR},      0, 0, FLAGS, "transfer" },
+    {     "log100",           0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_LOG_100},     0, 0, FLAGS, "transfer" },
+    {     "log316",           0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_LOG_316},     0, 0, FLAGS, "transfer" },
     {     "bt2020-10",        0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_2020_10},     0, 0, FLAGS, "transfer" },
     {     "bt2020-12",        0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_2020_12},     0, 0, FLAGS, "transfer" },
     {     "smpte2084",        0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_ST2084},      0, 0, FLAGS, "transfer" },
+    {     "iec61966-2-4",     0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_IEC_61966_2_4},0, 0, FLAGS, "transfer" },
     {     "iec61966-2-1",     0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_IEC_61966_2_1},0, 0, FLAGS, "transfer" },
     {     "arib-std-b67",     0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_TRANSFER_ARIB_B67},    0, 0, FLAGS, "transfer" },
-    { "matrix", "set colorspace matrix", OFFSET(colorspace), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_MATRIX_2020_CL, FLAGS, "matrix" },
-    { "m",      "set colorspace matrix", OFFSET(colorspace), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_MATRIX_2020_CL, FLAGS, "matrix" },
+    { "matrix", "set colorspace matrix", OFFSET(colorspace), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, FLAGS, "matrix" },
+    { "m",      "set colorspace matrix", OFFSET(colorspace), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, FLAGS, "matrix" },
     {     "input",            0,       0,                 AV_OPT_TYPE_CONST, {.i64 = -1},                      0, 0, FLAGS, "matrix" },
     {     "709",              0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_709},         0, 0, FLAGS, "matrix" },
     {     "unspecified",      0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_UNSPECIFIED}, 0, 0, FLAGS, "matrix" },
@@ -776,21 +1053,27 @@ static const AVOption zscale_options[] = {
     {     "2020_ncl",         0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_2020_NCL},    0, 0, FLAGS, "matrix" },
     {     "2020_cl",          0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_2020_CL},     0, 0, FLAGS, "matrix" },
     {     "unknown",          0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_UNSPECIFIED}, 0, 0, FLAGS, "matrix" },
+    {     "gbr",              0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_RGB},         0, 0, FLAGS, "matrix" },
     {     "bt709",            0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_709},         0, 0, FLAGS, "matrix" },
+    {     "fcc",              0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_FCC},         0, 0, FLAGS, "matrix" },
     {     "bt470bg",          0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_470BG},       0, 0, FLAGS, "matrix" },
     {     "smpte170m",        0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_170M},        0, 0, FLAGS, "matrix" },
+    {     "smpte2400m",       0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_240M},        0, 0, FLAGS, "matrix" },
     {     "ycgco",            0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_YCGCO},       0, 0, FLAGS, "matrix" },
     {     "bt2020nc",         0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_2020_NCL},    0, 0, FLAGS, "matrix" },
     {     "bt2020c",          0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_2020_CL},     0, 0, FLAGS, "matrix" },
+    {     "chroma-derived-nc",0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_CHROMATICITY_DERIVED_NCL}, 0, 0, FLAGS, "matrix" },
+    {     "chroma-derived-c", 0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_CHROMATICITY_DERIVED_CL}, 0, 0, FLAGS, "matrix" },
+    {     "ictcp",            0,       0,                 AV_OPT_TYPE_CONST, {.i64 = ZIMG_MATRIX_ICTCP},       0, 0, FLAGS, "matrix" },
     { "in_range", "set input color range", OFFSET(range_in),    AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_RANGE_FULL, FLAGS, "range" },
     { "rangein", "set input color range", OFFSET(range_in),     AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_RANGE_FULL, FLAGS, "range" },
     { "rin",     "set input color range", OFFSET(range_in),     AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_RANGE_FULL, FLAGS, "range" },
-    { "primariesin", "set input color primaries", OFFSET(primaries_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_PRIMARIES_ST432_1, FLAGS, "primaries" },
-    { "pin",         "set input color primaries", OFFSET(primaries_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_PRIMARIES_ST432_1, FLAGS, "primaries" },
-    { "transferin", "set input transfer characteristic", OFFSET(trc_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_TRANSFER_ARIB_B67, FLAGS, "transfer" },
-    { "tin",        "set input transfer characteristic", OFFSET(trc_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_TRANSFER_ARIB_B67, FLAGS, "transfer" },
-    { "matrixin", "set input colorspace matrix", OFFSET(colorspace_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_MATRIX_2020_CL, FLAGS, "matrix" },
-    { "min",      "set input colorspace matrix", OFFSET(colorspace_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_MATRIX_2020_CL, FLAGS, "matrix" },
+    { "primariesin", "set input color primaries", OFFSET(primaries_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, FLAGS, "primaries" },
+    { "pin",         "set input color primaries", OFFSET(primaries_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, FLAGS, "primaries" },
+    { "transferin", "set input transfer characteristic", OFFSET(trc_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, FLAGS, "transfer" },
+    { "tin",        "set input transfer characteristic", OFFSET(trc_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, FLAGS, "transfer" },
+    { "matrixin", "set input colorspace matrix", OFFSET(colorspace_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, FLAGS, "matrix" },
+    { "min",      "set input colorspace matrix", OFFSET(colorspace_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, FLAGS, "matrix" },
     { "chromal",  "set output chroma location", OFFSET(chromal), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_CHROMA_BOTTOM, FLAGS, "chroma" },
     { "c",        "set output chroma location", OFFSET(chromal), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_CHROMA_BOTTOM, FLAGS, "chroma" },
     {     "input",     0, 0, AV_OPT_TYPE_CONST, {.i64 = -1},                       0, 0, FLAGS, "chroma" },
@@ -804,16 +1087,13 @@ static const AVOption zscale_options[] = {
     { "cin",        "set input chroma location", OFFSET(chromal_in), AV_OPT_TYPE_INT, {.i64 = -1}, -1, ZIMG_CHROMA_BOTTOM, FLAGS, "chroma" },
     { "npl",       "set nominal peak luminance", OFFSET(nominal_peak_luminance), AV_OPT_TYPE_DOUBLE, {.dbl = NAN}, 0, DBL_MAX, FLAGS },
     { "agamma",       "allow approximate gamma", OFFSET(approximate_gamma),      AV_OPT_TYPE_BOOL,   {.i64 = 1},   0, 1,       FLAGS },
+    { "param_a", "parameter A, which is parameter \"b\" for bicubic, "
+                 "and the number of filter taps for lanczos", OFFSET(param_a), AV_OPT_TYPE_DOUBLE, {.dbl = NAN}, -DBL_MAX, DBL_MAX, FLAGS },
+    { "param_b", "parameter B, which is parameter \"c\" for bicubic", OFFSET(param_b), AV_OPT_TYPE_DOUBLE, {.dbl = NAN}, -DBL_MAX, DBL_MAX, FLAGS },
     { NULL }
 };
 
-static const AVClass zscale_class = {
-    .class_name       = "zscale",
-    .item_name        = av_default_item_name,
-    .option           = zscale_options,
-    .version          = LIBAVUTIL_VERSION_INT,
-    .category         = AV_CLASS_CATEGORY_FILTER,
-};
+AVFILTER_DEFINE_CLASS(zscale);
 
 static const AVFilterPad avfilter_vf_zscale_inputs[] = {
     {
@@ -821,7 +1101,6 @@ static const AVFilterPad avfilter_vf_zscale_inputs[] = {
         .type         = AVMEDIA_TYPE_VIDEO,
         .filter_frame = filter_frame,
     },
-    { NULL }
 };
 
 static const AVFilterPad avfilter_vf_zscale_outputs[] = {
@@ -830,18 +1109,18 @@ static const AVFilterPad avfilter_vf_zscale_outputs[] = {
         .type         = AVMEDIA_TYPE_VIDEO,
         .config_props = config_props,
     },
-    { NULL }
 };
 
-AVFilter ff_vf_zscale = {
+const AVFilter ff_vf_zscale = {
     .name            = "zscale",
     .description     = NULL_IF_CONFIG_SMALL("Apply resizing, colorspace and bit depth conversion."),
-    .init_dict       = init_dict,
-    .query_formats   = query_formats,
+    .init            = init,
     .priv_size       = sizeof(ZScaleContext),
     .priv_class      = &zscale_class,
     .uninit          = uninit,
-    .inputs          = avfilter_vf_zscale_inputs,
-    .outputs         = avfilter_vf_zscale_outputs,
+    FILTER_INPUTS(avfilter_vf_zscale_inputs),
+    FILTER_OUTPUTS(avfilter_vf_zscale_outputs),
+    FILTER_QUERY_FUNC(query_formats),
     .process_command = process_command,
+    .flags           = AVFILTER_FLAG_SLICE_THREADS,
 };

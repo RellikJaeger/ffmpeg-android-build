@@ -25,6 +25,56 @@
 #include "mdct15.h"
 #include "libavutil/qsort.h"
 
+static float pvq_band_cost(CeltPVQ *pvq, CeltFrame *f, OpusRangeCoder *rc, int band,
+                           float *bits, float lambda)
+{
+    int i, b = 0;
+    uint32_t cm[2] = { (1 << f->blocks) - 1, (1 << f->blocks) - 1 };
+    const int band_size = ff_celt_freq_range[band] << f->size;
+    float buf[176 * 2], lowband_scratch[176], norm1[176], norm2[176];
+    float dist, cost, err_x = 0.0f, err_y = 0.0f;
+    float *X = buf;
+    float *X_orig = f->block[0].coeffs + (ff_celt_freq_bands[band] << f->size);
+    float *Y = (f->channels == 2) ? &buf[176] : NULL;
+    float *Y_orig = f->block[1].coeffs + (ff_celt_freq_bands[band] << f->size);
+    OPUS_RC_CHECKPOINT_SPAWN(rc);
+
+    memcpy(X, X_orig, band_size*sizeof(float));
+    if (Y)
+        memcpy(Y, Y_orig, band_size*sizeof(float));
+
+    f->remaining2 = ((f->framebits << 3) - f->anticollapse_needed) - opus_rc_tell_frac(rc) - 1;
+    if (band <= f->coded_bands - 1) {
+        int curr_balance = f->remaining / FFMIN(3, f->coded_bands - band);
+        b = av_clip_uintp2(FFMIN(f->remaining2 + 1, f->pulses[band] + curr_balance), 14);
+    }
+
+    if (f->dual_stereo) {
+        pvq->quant_band(pvq, f, rc, band, X, NULL, band_size, b / 2, f->blocks, NULL,
+                        f->size, norm1, 0, 1.0f, lowband_scratch, cm[0]);
+
+        pvq->quant_band(pvq, f, rc, band, Y, NULL, band_size, b / 2, f->blocks, NULL,
+                        f->size, norm2, 0, 1.0f, lowband_scratch, cm[1]);
+    } else {
+        pvq->quant_band(pvq, f, rc, band, X, Y, band_size, b, f->blocks, NULL, f->size,
+                        norm1, 0, 1.0f, lowband_scratch, cm[0] | cm[1]);
+    }
+
+    for (i = 0; i < band_size; i++) {
+        err_x += (X[i] - X_orig[i])*(X[i] - X_orig[i]);
+        if (Y)
+            err_y += (Y[i] - Y_orig[i])*(Y[i] - Y_orig[i]);
+    }
+
+    dist = sqrtf(err_x) + sqrtf(err_y);
+    cost = OPUS_RC_CHECKPOINT_BITS(rc)/8.0f;
+    *bits += cost;
+
+    OPUS_RC_CHECKPOINT_ROLLBACK(rc);
+
+    return lambda*dist*cost;
+}
+
 /* Populate metrics without taking into consideration neighbouring steps */
 static void step_collect_psy_metrics(OpusPsyContext *s, int index)
 {
@@ -33,7 +83,7 @@ static void step_collect_psy_metrics(OpusPsyContext *s, int index)
 
     st->index = index;
 
-    for (ch = 0; ch < s->avctx->channels; ch++) {
+    for (ch = 0; ch < s->avctx->ch_layout.nb_channels; ch++) {
         const int lap_size = (1 << s->bsize_analysis);
         for (i = 1; i <= FFMIN(lap_size, index); i++) {
             const int offset = i*120;
@@ -55,7 +105,7 @@ static void step_collect_psy_metrics(OpusPsyContext *s, int index)
             st->bands[ch][i] = &st->coeffs[ch][ff_celt_freq_bands[i] << s->bsize_analysis];
     }
 
-    for (ch = 0; ch < s->avctx->channels; ch++) {
+    for (ch = 0; ch < s->avctx->ch_layout.nb_channels; ch++) {
         for (i = 0; i < CELT_MAX_BANDS; i++) {
             float avg_c_s, energy = 0.0f, dist_dev = 0.0f;
             const int range = ff_celt_freq_range[i] << s->bsize_analysis;
@@ -69,7 +119,7 @@ static void step_collect_psy_metrics(OpusPsyContext *s, int index)
 
             for (j = 0; j < range; j++) {
                 const float c_s = coeffs[j]*coeffs[j];
-                dist_dev = (avg_c_s - c_s)*(avg_c_s - c_s);
+                dist_dev += (avg_c_s - c_s)*(avg_c_s - c_s);
             }
 
             st->tone[ch][i] += sqrtf(dist_dev);
@@ -78,7 +128,7 @@ static void step_collect_psy_metrics(OpusPsyContext *s, int index)
 
     st->silence = !silence;
 
-    if (s->avctx->channels > 1) {
+    if (s->avctx->ch_layout.nb_channels > 1) {
         for (i = 0; i < CELT_MAX_BANDS; i++) {
             float incompat = 0.0f;
             const float *coeffs1 = st->bands[0][i];
@@ -90,7 +140,7 @@ static void step_collect_psy_metrics(OpusPsyContext *s, int index)
         }
     }
 
-    for (ch = 0; ch < s->avctx->channels; ch++) {
+    for (ch = 0; ch < s->avctx->ch_layout.nb_channels; ch++) {
         for (i = 0; i < CELT_MAX_BANDS; i++) {
             OpusBandExcitation *ex = &s->ex[ch][i];
             float bp_e = bessel_filter(&s->bfilter_lo[ch][i], st->energy[ch][i]);
@@ -209,7 +259,7 @@ void ff_opus_psy_celt_frame_init(OpusPsyContext *s, CeltFrame *f, int index)
 
     f->start_band = (s->p.mode == OPUS_MODE_HYBRID) ? 17 : 0;
     f->end_band   = ff_celt_band_end[s->p.bandwidth];
-    f->channels   = s->avctx->channels;
+    f->channels   = s->avctx->ch_layout.nb_channels;
     f->size       = s->p.framesize;
 
     for (i = 0; i < (1 << f->size); i++)
@@ -277,7 +327,7 @@ static void celt_gauge_psy_weight(OpusPsyContext *s, OpusPsyStep **start,
         float tonal_contrib = 0.0f;
         for (f = 0; f < (1 << s->p.framesize); f++) {
             weight = start[f]->stereo[i];
-            for (ch = 0; ch < s->avctx->channels; ch++) {
+            for (ch = 0; ch < s->avctx->ch_layout.nb_channels; ch++) {
                 weight += start[f]->change_amp[ch][i] + start[f]->tone[ch][i] + start[f]->energy[ch][i];
                 tonal_contrib += start[f]->tone[ch][i];
             }
@@ -316,11 +366,11 @@ static int bands_dist(OpusPsyContext *s, CeltFrame *f, float *total_dist)
     OpusRangeCoder dump;
 
     ff_opus_rc_enc_init(&dump);
-    ff_celt_enc_bitalloc(&dump, f);
+    ff_celt_bitalloc(f, &dump, 1);
 
     for (i = 0; i < CELT_MAX_BANDS; i++) {
         float bits = 0.0f;
-        float dist = f->pvq->band_cost(f->pvq, f, &dump, i, &bits, s->lambda);
+        float dist = pvq_band_cost(f->pvq, f, &dump, i, &bits, s->lambda);
         tdist += dist;
     }
 
@@ -333,6 +383,10 @@ static void celt_search_for_dual_stereo(OpusPsyContext *s, CeltFrame *f)
 {
     float td1, td2;
     f->dual_stereo = 0;
+
+    if (s->avctx->ch_layout.nb_channels < 2)
+        return;
+
     bands_dist(s, f, &td1);
     f->dual_stereo = 1;
     bands_dist(s, f, &td2);
@@ -345,9 +399,11 @@ static void celt_search_for_intensity(OpusPsyContext *s, CeltFrame *f)
 {
     int i, best_band = CELT_MAX_BANDS - 1;
     float dist, best_dist = FLT_MAX;
-
     /* TODO: fix, make some heuristic up here using the lambda value */
     float end_band = 0;
+
+    if (s->avctx->ch_layout.nb_channels < 2)
+        return;
 
     for (i = f->end_band; i >= end_band; i--) {
         f->intensity_stereo = i;
@@ -370,7 +426,6 @@ static int celt_search_for_tf(OpusPsyContext *s, OpusPsyStep **start, CeltFrame 
     for (cway = 0; cway < 2; cway++) {
         int mag[2];
         int base = f->transient ? 120 : 960;
-        int i;
 
         for (i = 0; i < 2; i++) {
             int c = ff_celt_tf_select[f->size][f->transient][cway][i];
@@ -381,7 +436,7 @@ static int celt_search_for_tf(OpusPsyContext *s, OpusPsyStep **start, CeltFrame 
             float iscore0 = 0.0f;
             float iscore1 = 0.0f;
             for (j = 0; j < (1 << f->size); j++) {
-                for (k = 0; k < s->avctx->channels; k++) {
+                for (k = 0; k < s->avctx->ch_layout.nb_channels; k++) {
                     iscore0 += start[j]->tone[k][i]*start[j]->change_amp[k][i]/mag[0];
                     iscore1 += start[j]->tone[k][i]*start[j]->change_amp[k][i]/mag[1];
                 }
@@ -485,7 +540,7 @@ av_cold int ff_opus_psy_init(OpusPsyContext *s, AVCodecContext *avctx,
         goto fail;
     }
 
-    for (ch = 0; ch < s->avctx->channels; ch++) {
+    for (ch = 0; ch < s->avctx->ch_layout.nb_channels; ch++) {
         for (i = 0; i < CELT_MAX_BANDS; i++) {
             bessel_init(&s->bfilter_hi[ch][i], 1.0f, 19.0f, 100.0f, 1);
             bessel_init(&s->bfilter_lo[ch][i], 1.0f, 20.0f, 100.0f, 0);

@@ -28,6 +28,7 @@
 #include "avcodec.h"
 #include "bytestream.h"
 #include "cga_data.h"
+#include "codec_internal.h"
 #include "internal.h"
 
 typedef struct PicContext {
@@ -63,29 +64,50 @@ static void picmemset(PicContext *s, AVFrame *frame, unsigned value, int run,
     uint8_t *d;
     int shift = *plane * bits_per_plane;
     unsigned mask  = ((1U << bits_per_plane) - 1) << shift;
+    int xl = *x;
+    int yl = *y;
+    int planel = *plane;
+    int pixels_per_value = 8/bits_per_plane;
     value   <<= shift;
 
+    d = frame->data[0] + yl * frame->linesize[0];
     while (run > 0) {
         int j;
         for (j = 8-bits_per_plane; j >= 0; j -= bits_per_plane) {
-            d = frame->data[0] + *y * frame->linesize[0];
-            d[*x] |= (value >> j) & mask;
-            *x += 1;
-            if (*x == s->width) {
-                *y -= 1;
-                *x = 0;
-                if (*y < 0) {
-                   *y = s->height - 1;
-                   *plane += 1;
-                   if (*plane >= s->nb_planes)
-                       return;
+            d[xl] |= (value >> j) & mask;
+            xl += 1;
+            while (xl == s->width) {
+                yl -= 1;
+                xl = 0;
+                if (yl < 0) {
+                   yl = s->height - 1;
+                   planel += 1;
+                   if (planel >= s->nb_planes)
+                       goto end;
                    value <<= bits_per_plane;
                    mask  <<= bits_per_plane;
+                }
+                d = frame->data[0] + yl * frame->linesize[0];
+                if (s->nb_planes == 1 &&
+                    run*pixels_per_value >= s->width &&
+                    pixels_per_value < (s->width / pixels_per_value * pixels_per_value)
+                    ) {
+                    for (; xl < pixels_per_value; xl ++) {
+                        j = (j < bits_per_plane ? 8 : j) - bits_per_plane;
+                        d[xl] |= (value >> j) & mask;
+                    }
+                    av_memcpy_backptr(d+xl, pixels_per_value, s->width - xl);
+                    run -= s->width / pixels_per_value;
+                    xl = s->width / pixels_per_value * pixels_per_value;
                 }
             }
         }
         run--;
     }
+end:
+    *x = xl;
+    *y = yl;
+    *plane = planel;
 }
 
 static const uint8_t cga_mode45_index[6][4] = {
@@ -97,12 +119,10 @@ static const uint8_t cga_mode45_index[6][4] = {
     [5] = { 0, 11, 12, 15 }, // mode5, high intensity
 };
 
-static int decode_frame(AVCodecContext *avctx,
-                        void *data, int *got_frame,
-                        AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
+                        int *got_frame, AVPacket *avpkt)
 {
     PicContext *s = avctx->priv_data;
-    AVFrame *frame = data;
     uint32_t *palette;
     int bits_per_plane, bpp, etype, esize, npal, pos_after_pal;
     int i, x, y, plane, tmp, ret, val;
@@ -236,6 +256,9 @@ static int decode_frame(AVCodecContext *avctx,
             }
         }
 
+        if (s->nb_planes - plane > 1)
+            return AVERROR_INVALIDDATA;
+
         if (plane < s->nb_planes && x < avctx->width) {
             int run = (y + 1) * avctx->width - x;
             if (bits_per_plane == 8)
@@ -256,12 +279,12 @@ finish:
     return avpkt->size;
 }
 
-AVCodec ff_pictor_decoder = {
-    .name           = "pictor",
-    .long_name      = NULL_IF_CONFIG_SMALL("Pictor/PC Paint"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_PICTOR,
+const FFCodec ff_pictor_decoder = {
+    .p.name         = "pictor",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("Pictor/PC Paint"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_PICTOR,
+    .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(PicContext),
-    .decode         = decode_frame,
-    .capabilities   = AV_CODEC_CAP_DR1,
+    FF_CODEC_DECODE_CB(decode_frame),
 };

@@ -36,34 +36,14 @@
 #undef SFENCE
 #undef PAVGB
 
-#if COMPILE_TEMPLATE_AMD3DNOW
-#define PREFETCH  "prefetch"
-#define PAVGB     "pavgusb"
-#elif COMPILE_TEMPLATE_MMXEXT
 #define PREFETCH "prefetchnta"
 #define PAVGB     "pavgb"
-#else
-#define PREFETCH  " # nop"
-#endif
-
-#if COMPILE_TEMPLATE_AMD3DNOW
-/* On K6 femms is faster than emms. On K7 femms is directly mapped to emms. */
-#define EMMS     "femms"
-#else
-#define EMMS     "emms"
-#endif
-
-#if COMPILE_TEMPLATE_MMXEXT
 #define MOVNTQ "movntq"
 #define SFENCE "sfence"
-#else
-#define MOVNTQ "movq"
-#define SFENCE " # nop"
-#endif
+
+#define EMMS     "emms"
 
 #if !COMPILE_TEMPLATE_SSE2
-
-#if !COMPILE_TEMPLATE_AMD3DNOW
 
 static inline void RENAME(rgb24tobgr32)(const uint8_t *src, uint8_t *dst, int src_size)
 {
@@ -1034,68 +1014,6 @@ static inline void RENAME(rgb16to32)(const uint8_t *src, uint8_t *dst, int src_s
     }
 }
 
-static inline void RENAME(shuffle_bytes_2103)(const uint8_t *src, uint8_t *dst, int src_size)
-{
-    x86_reg idx = 15 - src_size;
-    const uint8_t *s = src-idx;
-    uint8_t *d = dst-idx;
-    __asm__ volatile(
-        "test          %0, %0           \n\t"
-        "jns           2f               \n\t"
-        PREFETCH"       (%1, %0)        \n\t"
-        "movq          %3, %%mm7        \n\t"
-        "pxor          %4, %%mm7        \n\t"
-        "movq       %%mm7, %%mm6        \n\t"
-        "pxor          %5, %%mm7        \n\t"
-        ".p2align       4               \n\t"
-        "1:                             \n\t"
-        PREFETCH"     32(%1, %0)        \n\t"
-        "movq           (%1, %0), %%mm0 \n\t"
-        "movq          8(%1, %0), %%mm1 \n\t"
-# if COMPILE_TEMPLATE_MMXEXT
-        "pshufw      $177, %%mm0, %%mm3 \n\t"
-        "pshufw      $177, %%mm1, %%mm5 \n\t"
-        "pand       %%mm7, %%mm0        \n\t"
-        "pand       %%mm6, %%mm3        \n\t"
-        "pand       %%mm7, %%mm1        \n\t"
-        "pand       %%mm6, %%mm5        \n\t"
-        "por        %%mm3, %%mm0        \n\t"
-        "por        %%mm5, %%mm1        \n\t"
-# else
-        "movq       %%mm0, %%mm2        \n\t"
-        "movq       %%mm1, %%mm4        \n\t"
-        "pand       %%mm7, %%mm0        \n\t"
-        "pand       %%mm6, %%mm2        \n\t"
-        "pand       %%mm7, %%mm1        \n\t"
-        "pand       %%mm6, %%mm4        \n\t"
-        "movq       %%mm2, %%mm3        \n\t"
-        "movq       %%mm4, %%mm5        \n\t"
-        "pslld        $16, %%mm2        \n\t"
-        "psrld        $16, %%mm3        \n\t"
-        "pslld        $16, %%mm4        \n\t"
-        "psrld        $16, %%mm5        \n\t"
-        "por        %%mm2, %%mm0        \n\t"
-        "por        %%mm4, %%mm1        \n\t"
-        "por        %%mm3, %%mm0        \n\t"
-        "por        %%mm5, %%mm1        \n\t"
-# endif
-        MOVNTQ"     %%mm0,  (%2, %0)    \n\t"
-        MOVNTQ"     %%mm1, 8(%2, %0)    \n\t"
-        "add          $16, %0           \n\t"
-        "js            1b               \n\t"
-        SFENCE"                         \n\t"
-        EMMS"                           \n\t"
-        "2:                             \n\t"
-        : "+&r"(idx)
-        : "r" (s), "r" (d), "m" (mask32b), "m" (mask32r), "m" (mmx_one)
-        : "memory");
-    for (; idx<15; idx+=4) {
-        register unsigned v  = *(const uint32_t *)&s[idx], g = v & 0xff00ff00;
-        v &= 0xff00ff;
-        *(uint32_t *)&d[idx] = (v>>16) + g + (v<<16);
-    }
-}
-
 static inline void RENAME(rgb24tobgr24)(const uint8_t *src, uint8_t *dst, int src_size)
 {
     unsigned i;
@@ -1415,9 +1333,7 @@ static inline void RENAME(yuy2toyv12)(const uint8_t *src, uint8_t *ydst, uint8_t
                      SFENCE"     \n\t"
                      :::"memory");
 }
-#endif /* !COMPILE_TEMPLATE_AMD3DNOW */
 
-#if COMPILE_TEMPLATE_MMXEXT || COMPILE_TEMPLATE_AMD3DNOW
 static inline void RENAME(planar2x)(const uint8_t *src, uint8_t *dst, int srcWidth, int srcHeight, int srcStride, int dstStride)
 {
     int x,y;
@@ -1515,9 +1431,7 @@ static inline void RENAME(planar2x)(const uint8_t *src, uint8_t *dst, int srcWid
                      SFENCE"     \n\t"
                      :::"memory");
 }
-#endif /* COMPILE_TEMPLATE_MMXEXT || COMPILE_TEMPLATE_AMD3DNOW */
 
-#if !COMPILE_TEMPLATE_AMD3DNOW
 /**
  * Height should be a multiple of 2 and width should be a multiple of 16.
  * (If this is a problem for anyone then tell me, and I will fix it.)
@@ -1621,7 +1535,6 @@ static inline void RENAME(uyvytoyv12)(const uint8_t *src, uint8_t *ydst, uint8_t
                      SFENCE"     \n\t"
                      :::"memory");
 }
-#endif /* !COMPILE_TEMPLATE_AMD3DNOW */
 
 /**
  * Height should be a multiple of 2 and width should be a multiple of 2.
@@ -1735,7 +1648,6 @@ static inline void RENAME(rgb24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_
             "1:                                         \n\t"
             PREFETCH" 64(%0, %%"FF_REG_d")              \n\t"
             PREFETCH" 64(%1, %%"FF_REG_d")              \n\t"
-#if COMPILE_TEMPLATE_MMXEXT || COMPILE_TEMPLATE_AMD3DNOW
             "movq       (%0, %%"FF_REG_d"), %%mm0       \n\t"
             "movq       (%1, %%"FF_REG_d"), %%mm1       \n\t"
             "movq      6(%0, %%"FF_REG_d"), %%mm2       \n\t"
@@ -1750,32 +1662,6 @@ static inline void RENAME(rgb24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_
             PAVGB"                   %%mm3, %%mm2       \n\t"
             "punpcklbw               %%mm7, %%mm0       \n\t"
             "punpcklbw               %%mm7, %%mm2       \n\t"
-#else
-            "movd       (%0, %%"FF_REG_d"), %%mm0       \n\t"
-            "movd       (%1, %%"FF_REG_d"), %%mm1       \n\t"
-            "movd      3(%0, %%"FF_REG_d"), %%mm2       \n\t"
-            "movd      3(%1, %%"FF_REG_d"), %%mm3       \n\t"
-            "punpcklbw               %%mm7, %%mm0       \n\t"
-            "punpcklbw               %%mm7, %%mm1       \n\t"
-            "punpcklbw               %%mm7, %%mm2       \n\t"
-            "punpcklbw               %%mm7, %%mm3       \n\t"
-            "paddw                   %%mm1, %%mm0       \n\t"
-            "paddw                   %%mm3, %%mm2       \n\t"
-            "paddw                   %%mm2, %%mm0       \n\t"
-            "movd      6(%0, %%"FF_REG_d"), %%mm4       \n\t"
-            "movd      6(%1, %%"FF_REG_d"), %%mm1       \n\t"
-            "movd      9(%0, %%"FF_REG_d"), %%mm2       \n\t"
-            "movd      9(%1, %%"FF_REG_d"), %%mm3       \n\t"
-            "punpcklbw               %%mm7, %%mm4       \n\t"
-            "punpcklbw               %%mm7, %%mm1       \n\t"
-            "punpcklbw               %%mm7, %%mm2       \n\t"
-            "punpcklbw               %%mm7, %%mm3       \n\t"
-            "paddw                   %%mm1, %%mm4       \n\t"
-            "paddw                   %%mm3, %%mm2       \n\t"
-            "paddw                   %%mm4, %%mm2       \n\t"
-            "psrlw                      $2, %%mm0       \n\t"
-            "psrlw                      $2, %%mm2       \n\t"
-#endif
             "movq          "BGR2V_IDX"(%5), %%mm1       \n\t"
             "movq          "BGR2V_IDX"(%5), %%mm3       \n\t"
 
@@ -1794,7 +1680,6 @@ static inline void RENAME(rgb24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_
             "packssdw                %%mm1, %%mm0       \n\t" // V1 V0 U1 U0
             "psraw                      $7, %%mm0       \n\t"
 
-#if COMPILE_TEMPLATE_MMXEXT || COMPILE_TEMPLATE_AMD3DNOW
             "movq     12(%0, %%"FF_REG_d"), %%mm4       \n\t"
             "movq     12(%1, %%"FF_REG_d"), %%mm1       \n\t"
             "movq     18(%0, %%"FF_REG_d"), %%mm2       \n\t"
@@ -1809,33 +1694,6 @@ static inline void RENAME(rgb24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_
             PAVGB"                   %%mm3, %%mm2       \n\t"
             "punpcklbw               %%mm7, %%mm4       \n\t"
             "punpcklbw               %%mm7, %%mm2       \n\t"
-#else
-            "movd     12(%0, %%"FF_REG_d"), %%mm4       \n\t"
-            "movd     12(%1, %%"FF_REG_d"), %%mm1       \n\t"
-            "movd     15(%0, %%"FF_REG_d"), %%mm2       \n\t"
-            "movd     15(%1, %%"FF_REG_d"), %%mm3       \n\t"
-            "punpcklbw               %%mm7, %%mm4       \n\t"
-            "punpcklbw               %%mm7, %%mm1       \n\t"
-            "punpcklbw               %%mm7, %%mm2       \n\t"
-            "punpcklbw               %%mm7, %%mm3       \n\t"
-            "paddw                   %%mm1, %%mm4       \n\t"
-            "paddw                   %%mm3, %%mm2       \n\t"
-            "paddw                   %%mm2, %%mm4       \n\t"
-            "movd     18(%0, %%"FF_REG_d"), %%mm5       \n\t"
-            "movd     18(%1, %%"FF_REG_d"), %%mm1       \n\t"
-            "movd     21(%0, %%"FF_REG_d"), %%mm2       \n\t"
-            "movd     21(%1, %%"FF_REG_d"), %%mm3       \n\t"
-            "punpcklbw               %%mm7, %%mm5       \n\t"
-            "punpcklbw               %%mm7, %%mm1       \n\t"
-            "punpcklbw               %%mm7, %%mm2       \n\t"
-            "punpcklbw               %%mm7, %%mm3       \n\t"
-            "paddw                   %%mm1, %%mm5       \n\t"
-            "paddw                   %%mm3, %%mm2       \n\t"
-            "paddw                   %%mm5, %%mm2       \n\t"
-            "movq       "MANGLE(ff_w1111)", %%mm5       \n\t"
-            "psrlw                      $2, %%mm4       \n\t"
-            "psrlw                      $2, %%mm2       \n\t"
-#endif
             "movq          "BGR2V_IDX"(%5), %%mm1       \n\t"
             "movq          "BGR2V_IDX"(%5), %%mm3       \n\t"
 
@@ -1884,7 +1742,7 @@ static inline void RENAME(rgb24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_
 #endif /* HAVE_7REGS */
 #endif /* !COMPILE_TEMPLATE_SSE2 */
 
-#if !COMPILE_TEMPLATE_AMD3DNOW && !COMPILE_TEMPLATE_AVX
+#if !COMPILE_TEMPLATE_AVX && COMPILE_TEMPLATE_SSE2
 static void RENAME(interleaveBytes)(const uint8_t *src1, const uint8_t *src2, uint8_t *dest,
                                     int width, int height, int src1Stride,
                                     int src2Stride, int dstStride)
@@ -1895,7 +1753,6 @@ static void RENAME(interleaveBytes)(const uint8_t *src1, const uint8_t *src2, ui
         int w;
 
         if (width >= 16) {
-#if COMPILE_TEMPLATE_SSE2
             if (!((((intptr_t)src1) | ((intptr_t)src2) | ((intptr_t)dest))&15)) {
         __asm__(
             "xor              %%"FF_REG_a", %%"FF_REG_a"  \n\t"
@@ -1916,7 +1773,6 @@ static void RENAME(interleaveBytes)(const uint8_t *src1, const uint8_t *src2, ui
             : "memory", XMM_CLOBBERS("xmm0", "xmm1", "xmm2",) "%"FF_REG_a
         );
             } else
-#endif
         __asm__(
             "xor %%"FF_REG_a", %%"FF_REG_a"         \n\t"
             "1:                                     \n\t"
@@ -1958,10 +1814,10 @@ static void RENAME(interleaveBytes)(const uint8_t *src1, const uint8_t *src2, ui
             ::: "memory"
             );
 }
-#endif /* !COMPILE_TEMPLATE_AMD3DNOW && !COMPILE_TEMPLATE_AVX */
+#endif /* !COMPILE_TEMPLATE_AVX && COMPILE_TEMPLATE_SSE2 */
 
 #if !COMPILE_TEMPLATE_AVX || HAVE_AVX_EXTERNAL
-#if !COMPILE_TEMPLATE_AMD3DNOW && (ARCH_X86_32 || COMPILE_TEMPLATE_SSE2) && COMPILE_TEMPLATE_MMXEXT == COMPILE_TEMPLATE_SSE2 && HAVE_X86ASM
+#if COMPILE_TEMPLATE_SSE2 && HAVE_X86ASM
 void RENAME(ff_nv12ToUV)(uint8_t *dstU, uint8_t *dstV,
                          const uint8_t *unused,
                          const uint8_t *src1,
@@ -1981,18 +1837,14 @@ static void RENAME(deinterleaveBytes)(const uint8_t *src, uint8_t *dst1, uint8_t
         dst2 += dst2Stride;
     }
     __asm__(
-#if !COMPILE_TEMPLATE_SSE2
-            EMMS"       \n\t"
-#endif
             SFENCE"     \n\t"
             ::: "memory"
             );
 }
-#endif /* !COMPILE_TEMPLATE_AMD3DNOW */
+#endif /* COMPILE_TEMPLATE_SSE2 && HAVE_X86ASM */
 #endif /* !COMPILE_TEMPLATE_AVX || HAVE_AVX_EXTERNAL */
 
 #if !COMPILE_TEMPLATE_SSE2
-#if !COMPILE_TEMPLATE_AMD3DNOW
 static inline void RENAME(vu9_to_vu12)(const uint8_t *src1, const uint8_t *src2,
                                        uint8_t *dst1, uint8_t *dst2,
                                        int width, int height,
@@ -2170,7 +2022,6 @@ static inline void RENAME(yvu9_to_yuy2)(const uint8_t *src1, const uint8_t *src2
             ::: "memory"
         );
 }
-#endif /* !COMPILE_TEMPLATE_AMD3DNOW */
 
 static void RENAME(extract_even)(const uint8_t *src, uint8_t *dst, x86_reg count)
 {
@@ -2247,7 +2098,7 @@ static void RENAME(extract_odd)(const uint8_t *src, uint8_t *dst, x86_reg count)
     }
 }
 
-#if !COMPILE_TEMPLATE_AMD3DNOW
+#if ARCH_X86_32
 static void RENAME(extract_even2)(const uint8_t *src, uint8_t *dst0, uint8_t *dst1, x86_reg count)
 {
     dst0+=   count;
@@ -2293,7 +2144,7 @@ static void RENAME(extract_even2)(const uint8_t *src, uint8_t *dst0, uint8_t *ds
         count++;
     }
 }
-#endif /* !COMPILE_TEMPLATE_AMD3DNOW */
+#endif /* ARCH_X86_32 */
 
 static void RENAME(extract_even2avg)(const uint8_t *src0, const uint8_t *src1, uint8_t *dst0, uint8_t *dst1, x86_reg count)
 {
@@ -2348,7 +2199,6 @@ static void RENAME(extract_even2avg)(const uint8_t *src0, const uint8_t *src1, u
     }
 }
 
-#if !COMPILE_TEMPLATE_AMD3DNOW
 static void RENAME(extract_odd2)(const uint8_t *src, uint8_t *dst0, uint8_t *dst1, x86_reg count)
 {
     dst0+=   count;
@@ -2395,7 +2245,6 @@ static void RENAME(extract_odd2)(const uint8_t *src, uint8_t *dst0, uint8_t *dst
         count++;
     }
 }
-#endif /* !COMPILE_TEMPLATE_AMD3DNOW */
 
 static void RENAME(extract_odd2avg)(const uint8_t *src0, const uint8_t *src1, uint8_t *dst0, uint8_t *dst1, x86_reg count)
 {
@@ -2477,7 +2326,6 @@ static void RENAME(yuyvtoyuv420)(uint8_t *ydst, uint8_t *udst, uint8_t *vdst, co
         );
 }
 
-#if !COMPILE_TEMPLATE_AMD3DNOW
 static void RENAME(yuyvtoyuv422)(uint8_t *ydst, uint8_t *udst, uint8_t *vdst, const uint8_t *src,
                                  int width, int height,
                                  int lumStride, int chromStride, int srcStride)
@@ -2500,7 +2348,6 @@ static void RENAME(yuyvtoyuv422)(uint8_t *ydst, uint8_t *udst, uint8_t *vdst, co
             ::: "memory"
         );
 }
-#endif /* !COMPILE_TEMPLATE_AMD3DNOW */
 
 static void RENAME(uyvytoyuv420)(uint8_t *ydst, uint8_t *udst, uint8_t *vdst, const uint8_t *src,
                                  int width, int height,
@@ -2527,7 +2374,7 @@ static void RENAME(uyvytoyuv420)(uint8_t *ydst, uint8_t *udst, uint8_t *vdst, co
         );
 }
 
-#if !COMPILE_TEMPLATE_AMD3DNOW
+#if ARCH_X86_32
 static void RENAME(uyvytoyuv422)(uint8_t *ydst, uint8_t *udst, uint8_t *vdst, const uint8_t *src,
                                  int width, int height,
                                  int lumStride, int chromStride, int srcStride)
@@ -2550,13 +2397,12 @@ static void RENAME(uyvytoyuv422)(uint8_t *ydst, uint8_t *udst, uint8_t *vdst, co
             ::: "memory"
         );
 }
-#endif /* !COMPILE_TEMPLATE_AMD3DNOW */
+#endif /* ARCH_X86_32 */
 #endif /* !COMPILE_TEMPLATE_SSE2 */
 
 static av_cold void RENAME(rgb2rgb_init)(void)
 {
 #if !COMPILE_TEMPLATE_SSE2
-#if !COMPILE_TEMPLATE_AMD3DNOW
     rgb15to16          = RENAME(rgb15to16);
     rgb15tobgr24       = RENAME(rgb15tobgr24);
     rgb15to32          = RENAME(rgb15to32);
@@ -2572,7 +2418,6 @@ static av_cold void RENAME(rgb2rgb_init)(void)
     rgb24to15          = RENAME(rgb24to15);
     rgb24to16          = RENAME(rgb24to16);
     rgb24tobgr24       = RENAME(rgb24tobgr24);
-    shuffle_bytes_2103 = RENAME(shuffle_bytes_2103);
     rgb32tobgr16       = RENAME(rgb32tobgr16);
     rgb32tobgr15       = RENAME(rgb32tobgr15);
     yv12toyuy2         = RENAME(yv12toyuy2);
@@ -2582,13 +2427,12 @@ static av_cold void RENAME(rgb2rgb_init)(void)
     yuy2toyv12         = RENAME(yuy2toyv12);
     vu9_to_vu12        = RENAME(vu9_to_vu12);
     yvu9_to_yuy2       = RENAME(yvu9_to_yuy2);
+#if ARCH_X86_32
     uyvytoyuv422       = RENAME(uyvytoyuv422);
+#endif
     yuyvtoyuv422       = RENAME(yuyvtoyuv422);
-#endif /* !COMPILE_TEMPLATE_AMD3DNOW */
 
-#if COMPILE_TEMPLATE_MMXEXT || COMPILE_TEMPLATE_AMD3DNOW
     planar2x           = RENAME(planar2x);
-#endif /* COMPILE_TEMPLATE_MMXEXT || COMPILE_TEMPLATE_AMD3DNOW */
 #if HAVE_7REGS
     ff_rgb24toyv12     = RENAME(rgb24toyv12);
 #endif /* HAVE_7REGS */
@@ -2597,11 +2441,11 @@ static av_cold void RENAME(rgb2rgb_init)(void)
     uyvytoyuv420       = RENAME(uyvytoyuv420);
 #endif /* !COMPILE_TEMPLATE_SSE2 */
 
-#if !COMPILE_TEMPLATE_AMD3DNOW && !COMPILE_TEMPLATE_AVX
+#if !COMPILE_TEMPLATE_AVX && COMPILE_TEMPLATE_SSE2
     interleaveBytes    = RENAME(interleaveBytes);
-#endif /* !COMPILE_TEMPLATE_AMD3DNOW && !COMPILE_TEMPLATE_AVX */
+#endif /* !COMPILE_TEMPLATE_AVX && COMPILE_TEMPLATE_SSE2 */
 #if !COMPILE_TEMPLATE_AVX || HAVE_AVX_EXTERNAL
-#if !COMPILE_TEMPLATE_AMD3DNOW && (ARCH_X86_32 || COMPILE_TEMPLATE_SSE2) && COMPILE_TEMPLATE_MMXEXT == COMPILE_TEMPLATE_SSE2 && HAVE_X86ASM
+#if COMPILE_TEMPLATE_SSE2 && HAVE_X86ASM
     deinterleaveBytes  = RENAME(deinterleaveBytes);
 #endif
 #endif

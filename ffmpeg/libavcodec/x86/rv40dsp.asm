@@ -25,7 +25,6 @@
 
 SECTION_RODATA
 
-align 16
 pw_1024:   times 8 dw 1 << (16 - 6) ; pw_1024
 
 sixtap_filter_hb_m:  times 8 db   1, -5
@@ -230,20 +229,6 @@ cglobal %1_rv40_qpel_h, 6, 6+npicregs, 12, dst, dststride, src, srcstride, heigh
     jg .nextrow
     REP_RET
 %endmacro
-
-%if ARCH_X86_32
-INIT_MMX  mmx
-FILTER_V  put
-FILTER_H  put
-
-INIT_MMX  mmxext
-FILTER_V  avg
-FILTER_H  avg
-
-INIT_MMX  3dnow
-FILTER_V  avg
-FILTER_H  avg
-%endif
 
 INIT_XMM  sse2
 FILTER_H  put
@@ -481,12 +466,6 @@ cglobal rv40_weight_func_%1_%2, 6, 7, 8
     jnz        .loop
     REP_RET
 %endmacro
-
-INIT_MMX mmxext
-RV40_WEIGHT   rnd,    8, 3
-RV40_WEIGHT   rnd,   16, 4
-RV40_WEIGHT   nornd,  8, 3
-RV40_WEIGHT   nornd, 16, 4
 
 INIT_XMM sse2
 RV40_WEIGHT   rnd,    8, 3
