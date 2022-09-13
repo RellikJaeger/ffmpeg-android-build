@@ -60,6 +60,9 @@ function build_ARMv7() {
   echo SO-Dir=${temp_prefix}/${SONAME}
 }
 
+export PKG_CONFIG_PATH=/Users/guaishou/Git/Github/ffmpeg-android-build/build/x264/android/arm/lib/pkgconfig
+export PKG_CONFIG_LIBDIR=/Users/guaishou/Git/Github/ffmpeg-android-build/build/x264/android/arm/lib/pkgconfig
+#exec /usr/bin/pkg-config "$@"
 build_ARMv7
 
 cp config.h $temp_prefix/config.h

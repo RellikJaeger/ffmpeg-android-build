@@ -3,6 +3,7 @@
 chmod a+x build_android_*.sh
 
 export COMMON_SET="--enable-static \
+  --pkg-config-flags=--static \
   --disable-symver \
   --disable-doc \
   --disable-htmlpages \
@@ -114,9 +115,11 @@ export COMMON_SET="--enable-static \
 # ./build_android_armeabi.sh
 
 # Build arm v7a
+#make distclean
 ./build_android_armeabi_v7a.sh
 
 # Build arm64 v8a
+#make distclean
 #./build_android_arm64_v8a.sh
 
 # Build x86
