@@ -25,6 +25,9 @@ Configuration options:
   --system-libx264         use system libx264 instead of internal
   --enable-shared          build shared library
   --enable-static          build static library
+  --disable-bashcompletion disable installation of bash-completion script
+  --enable-bashcompletion  force installation of bash-completion script
+  --bashcompletionsdir=DIR install bash-completion script in DIR [auto]
   --disable-opencl         disable OpenCL features
   --disable-gpl            disable GPL-only features
   --disable-thread         disable multithreaded encoding
@@ -121,6 +124,7 @@ cl_ldflags() {
         arg=${arg/pthreadGC/pthreadVC}
         [ "$arg" = avifil32.lib ] && arg=vfw32.lib
         [ "$arg" = gpac_static.lib ] && arg=libgpac_static.lib
+        [ "$arg" = gpac.lib ] && arg=libgpac.lib
         [ "$arg" = x264.lib ] && arg=libx264.lib
 
         [ -n "$arg" ] && echo -n "$arg "
@@ -363,6 +367,8 @@ cli="yes"
 cli_libx264="internal"
 shared="no"
 static="no"
+bashcompletion="auto"
+bashcompletionsdir=""
 avs="auto"
 lavf="auto"
 ffms="auto"
@@ -438,6 +444,15 @@ for opt do
             ;;
         --enable-static)
             static="yes"
+            ;;
+        --disable-bashcompletion)
+            bashcompletion="no"
+            ;;
+        --enable-bashcompletion)
+            bashcompletion="yes"
+            ;;
+        --bashcompletionsdir=*)
+            bashcompletionsdir="$optarg"
             ;;
         --disable-asm)
             asm="no"
@@ -541,6 +556,7 @@ done
 
 CC="${CC-${cross_prefix}gcc}"
 STRIP="${STRIP-${cross_prefix}strip}"
+STRINGS="${STRINGS-${cross_prefix}strings}"
 INSTALL="${INSTALL-install}"
 PKGCONFIG="${PKGCONFIG-${cross_prefix}pkg-config}"
 
@@ -573,7 +589,7 @@ trap 'rm -rf conftest*' EXIT
 # test for use of compilers that require specific handling
 cc_base="$(basename "$CC")"
 QPRE="-"
-if [[ $host_os = mingw* || $host_os = cygwin* ]]; then
+if [[ $host_os = mingw* || $host_os = msys* || $host_os = cygwin* ]]; then
     if [[ "$cc_base" = icl || "$cc_base" = icl[\ .]* ]]; then
         # Windows Intel Compiler creates dependency generation with absolute Windows paths, Cygwin's make does not support Windows paths.
         [[ $host_os = cygwin* ]] && die "Windows Intel Compiler support requires MSYS"
@@ -806,6 +822,23 @@ case $host_cpu in
         AS="${AS-${CC}}"
         AS_EXT=".c"
         ;;
+    aarch64|arm64*)
+        ARCH="AARCH64"
+        stack_alignment=16
+        if [ "$SYS" = MACOSX ] ; then
+            AS="${AS-${CC}}"
+            ASFLAGS="$ASFLAGS -DPREFIX -DPIC"
+            if cc_check '' "-arch arm64"; then
+                CFLAGS="$CFLAGS -arch arm64"
+                LDFLAGS="$LDFLAGS -arch arm64"
+                ASFLAGS="$ASFLAGS -arch arm64"
+            fi
+        elif [ "$SYS" = WINDOWS ] && [ "$compiler" = CL ] ; then
+            AS="${AS-${SRCPATH}/tools/gas-preprocessor.pl -arch aarch64 -as-type armasm -- armasm64 -nologo}"
+        else
+            AS="${AS-${CC}}"
+        fi
+        ;;
     arm*)
         ARCH="ARM"
         if [ "$SYS" = MACOSX ] ; then
@@ -820,18 +853,6 @@ case $host_cpu in
             AS="${AS-${SRCPATH}/tools/gas-preprocessor.pl -arch arm -as-type armasm -force-thumb -- armasm -nologo -ignore 4509}"
         elif [ "$SYS" = WINDOWS ] ; then
             AS="${AS-${SRCPATH}/tools/gas-preprocessor.pl -arch arm -as-type clang -force-thumb -- ${CC} -mimplicit-it=always}"
-        else
-            AS="${AS-${CC}}"
-        fi
-        ;;
-    aarch64)
-        ARCH="AARCH64"
-        stack_alignment=16
-        if [ "$SYS" = MACOSX ] ; then
-            AS="${AS-${CC}}"
-            ASFLAGS="$ASFLAGS -DPREFIX -DPIC"
-        elif [ "$SYS" = WINDOWS ] && [ "$compiler" = CL ] ; then
-            AS="${AS-${SRCPATH}/tools/gas-preprocessor.pl -arch aarch64 -as-type armasm -- armasm64 -nologo}"
         else
             AS="${AS-${CC}}"
         fi
@@ -900,7 +921,7 @@ if [ $compiler_style = GNU ]; then
     fi
 fi
 
-if [ $shared = yes -a \( $ARCH = "X86_64" -o $ARCH = "PPC" -o $ARCH = "ALPHA" -o $ARCH = "ARM" -o $ARCH = "IA64" -o $ARCH = "PARISC" -o $ARCH = "MIPS" -o $ARCH = "AARCH64" \) ] ; then
+if [ $shared = yes ] ; then
     pic="yes"
 fi
 
@@ -1016,11 +1037,11 @@ ASFLAGS="$ASFLAGS -DSTACK_ALIGNMENT=$stack_alignment"
 CPU_ENDIAN="little-endian"
 if [ $compiler = GNU ]; then
     echo "int i[2] = {0x42494745,0}; double f[2] = {0x1.0656e6469616ep+102,0};" > conftest.c
-    $CC $CFLAGS conftest.c -c -o conftest.o 2>/dev/null || die "endian test failed"
-    if (${cross_prefix}strings -a conftest.o | grep -q BIGE) && (${cross_prefix}strings -a conftest.o | grep -q FPendian) ; then
+    $CC $CFLAGS -fno-lto conftest.c -c -o conftest.o 2>/dev/null || die "endian test failed"
+    if (${STRINGS} -a conftest.o | grep -q BIGE) && (${STRINGS} -a conftest.o | grep -q FPendian) ; then
         define WORDS_BIGENDIAN
         CPU_ENDIAN="big-endian"
-    elif !(${cross_prefix}strings -a conftest.o | grep -q EGIB && ${cross_prefix}strings -a conftest.o | grep -q naidnePF) ; then
+    elif !(${STRINGS} -a conftest.o | grep -q EGIB && ${STRINGS} -a conftest.o | grep -q naidnePF) ; then
         die "endian test failed"
     fi
 fi
@@ -1153,7 +1174,7 @@ if [ "$lavf" = "auto" ] ; then
         done
     fi
 
-    if cc_check libavformat/avformat.h "$LAVF_CFLAGS $LAVF_LIBS" "av_register_all();" ; then
+    if cc_check libavformat/avformat.h "$LAVF_CFLAGS $LAVF_LIBS" "av_demuxer_iterate(0);" ; then
         if cc_check libavcodec/avcodec.h "$LAVF_CFLAGS $LAVF_LIBS" "avcodec_send_packet(0,0);" ; then
             lavf="yes"
         else
@@ -1229,17 +1250,35 @@ fi
 
 if [ "$gpac" = "auto" -a "$lsmash" != "yes" ] ; then
     gpac="no"
-    GPAC_LIBS="-lgpac_static"
-    cc_check "" -lz && GPAC_LIBS="$GPAC_LIBS -lz"
-    if [ "$SYS" = "WINDOWS" ] ; then
-        cc_check "" -lws2_32 && GPAC_LIBS="$GPAC_LIBS -lws2_32"
-        cc_check "" -lwinmm && GPAC_LIBS="$GPAC_LIBS -lwinmm"
+    if pkg_check gpac ; then
+        GPAC_LIBS_TMP="$GPAC_LIBS $($PKGCONFIG --libs gpac)"
+        GPAC_CFLAGS_TMP="$GPAC_CFLAGS $($PKGCONFIG --cflags gpac)"
+        if cc_check gpac/isomedia.h "$GPAC_CFLAGS_TMP $GPAC_LIBS_TMP" "gf_isom_close(0);" ; then
+            GPAC_LIBS="$GPAC_LIBS_TMP"
+            GPAC_CFLAGS="$GPAC_CFLAGS_TMP"
+        else
+            GPAC_LIBS_TMP="$GPAC_LIBS $($PKGCONFIG --static --libs gpac | sed 's/-lgpac //')"
+            GPAC_CFLAGS_TMP="$GPAC_CFLAGS $($PKGCONFIG --static --cflags gpac)"
+            if cc_check gpac/isomedia.h "$GPAC_CFLAGS_TMP $GPAC_LIBS_TMP" "gf_isom_close(0);" ; then
+                GPAC_LIBS="$GPAC_LIBS_TMP"
+                GPAC_CFLAGS="$GPAC_CFLAGS_TMP"
+            fi
+        fi
     fi
-    if cc_check gpac/isomedia.h "$GPAC_LIBS" "gf_isom_close(0);" ; then
-        if cc_check gpac/isomedia.h "$GPAC_LIBS" "gf_isom_set_pixel_aspect_ratio(0,0,0,0,0);" ; then
+    if [ -z "$GPAC_LIBS" ] ; then
+        GPAC_LIBS="-lgpac_static"
+        cc_check "" -lz && GPAC_LIBS="$GPAC_LIBS -lz"
+        cc_check "" -ldl && GPAC_LIBS="$GPAC_LIBS -ldl"
+        if [ "$SYS" = "WINDOWS" ] ; then
+            cc_check "" -lws2_32 && GPAC_LIBS="$GPAC_LIBS -lws2_32"
+            cc_check "" -lwinmm && GPAC_LIBS="$GPAC_LIBS -lwinmm"
+        fi
+    fi
+    if cc_check gpac/isomedia.h "$GPAC_CFLAGS $GPAC_LIBS" "gf_isom_close(0);" ; then
+        if cc_check gpac/isomedia.h "$GPAC_CFLAGS $GPAC_LIBS" "gf_isom_set_pixel_aspect_ratio(0,0,0,0,0,0);" ; then
             gpac="yes"
         else
-            echo "Warning: gpac is too old, update to 2007-06-21 UTC or later"
+            echo "Warning: gpac is too old, update to v0.8.0 or later"
         fi
     fi
 fi
@@ -1252,6 +1291,7 @@ if [ "$lsmash" = "yes" ] ; then
 elif [ "$gpac" = "yes" ] ; then
     mp4="gpac"
     LDFLAGSCLI="$GPAC_LIBS $LDFLAGSCLI"
+    CFLAGS="$CFLAGS $GPAC_CFLAGS"
     define HAVE_GPAC
 fi
 
@@ -1259,16 +1299,17 @@ if [ "$avs" = "auto" ] ; then
     avs="no"
     # cygwin can use avisynth if it can use LoadLibrary
     if [ $SYS = WINDOWS ] || ([ $SYS = CYGWIN ] && cc_check windows.h "" "LoadLibraryW(0);") ; then
-        avs="avisynth"
+        avs="yes"
         define HAVE_AVS
-        define USE_AVXSYNTH 0
     elif [ "$SYS" = "LINUX" -o "$SYS" = "MACOSX" ] ; then
-    # AvxSynth currently only supports Linux and OSX
-        avs="avxsynth"
+        avs="yes"
         define HAVE_AVS
-        define USE_AVXSYNTH 1
         AVS_LIBS="-ldl"
         LDFLAGSCLI="$AVS_LIBS $LDFLAGSCLI"
+    elif [ "$SYS" = "FREEBSD" -o "$SYS" = "OPENBSD" -o "$SYS" = "NETBSD" -o "$SYS" = "HAIKU" ] ; then
+        avs="yes"
+        define HAVE_AVS
+        # dlopen is exported from libc on both *BSD and Haiku
     fi
 fi
 
@@ -1562,6 +1603,27 @@ if [ "$static" = "yes" ]; then
     echo 'install: install-lib-static' >> config.mak
 fi
 
+if [ "$bashcompletion" = "auto" ]; then
+    if [ "$cli" = "no" ]; then
+        bashcompletion="no"
+    elif [[ -z "$bashcompletionsdir" && "$prefix" != "/usr" && "$prefix" != "/usr/"* ]]; then
+        bashcompletion="no"
+    fi
+fi
+
+if [ "$bashcompletion" != "no" ]; then
+    if [ -z "$bashcompletionsdir" ] && pkg_check bash-completion ; then
+        bashcompletionsdir="$($PKGCONFIG --variable=completionsdir bash-completion)"
+    fi
+    if [ -n "$bashcompletionsdir" ]; then
+        bashcompletion="yes"
+        echo 'install: install-bashcompletion' >> config.mak
+        echo "BASHCOMPLETIONSDIR=$bashcompletionsdir" >> config.mak
+    else
+        bashcompletion="no"
+    fi
+fi
+
 cat > x264.pc << EOF
 prefix=$prefix
 exec_prefix=$exec_prefix
@@ -1580,30 +1642,31 @@ filters="crop select_every"
 [ $swscale = yes ] && filters="resize $filters"
 
 cat > conftest.log <<EOF
-platform:      $ARCH
-byte order:    $CPU_ENDIAN
-system:        $SYS
-cli:           $cli
-libx264:       $cli_libx264
-shared:        $shared
-static:        $static
-asm:           $asm
-interlaced:    $interlaced
-avs:           $avs
-lavf:          $lavf
-ffms:          $ffms
-mp4:           $mp4
-gpl:           $gpl
-thread:        $thread
-opencl:        $opencl
-filters:       $filters
-lto:           $lto
-debug:         $debug
-gprof:         $gprof
-strip:         $strip
-PIC:           $pic
-bit depth:     $bit_depth
-chroma format: $chroma_format
+platform:       $ARCH
+byte order:     $CPU_ENDIAN
+system:         $SYS
+cli:            $cli
+libx264:        $cli_libx264
+shared:         $shared
+static:         $static
+bashcompletion: $bashcompletion
+asm:            $asm
+interlaced:     $interlaced
+avs:            $avs
+lavf:           $lavf
+ffms:           $ffms
+mp4:            $mp4
+gpl:            $gpl
+thread:         $thread
+opencl:         $opencl
+filters:        $filters
+lto:            $lto
+debug:          $debug
+gprof:          $gprof
+strip:          $strip
+PIC:            $pic
+bit depth:      $bit_depth
+chroma format:  $chroma_format
 EOF
 
 echo >> config.log

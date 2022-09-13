@@ -1,7 +1,7 @@
 /*****************************************************************************
  * pixel.c: pixel metrics
  *****************************************************************************
- * Copyright (C) 2003-2020 x264 project
+ * Copyright (C) 2003-2022 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -267,11 +267,11 @@ static NOINLINE int x264_pixel_satd_4x4( pixel *pix1, intptr_t i_pix1, pixel *pi
     sum2_t sum = 0;
     for( int i = 0; i < 4; i++, pix1 += i_pix1, pix2 += i_pix2 )
     {
-        a0 = pix1[0] - pix2[0];
-        a1 = pix1[1] - pix2[1];
+        a0 = (sum2_t)(pix1[0] - pix2[0]);
+        a1 = (sum2_t)(pix1[1] - pix2[1]);
         b0 = (a0+a1) + ((a0-a1)<<BITS_PER_SUM);
-        a2 = pix1[2] - pix2[2];
-        a3 = pix1[3] - pix2[3];
+        a2 = (sum2_t)(pix1[2] - pix2[2]);
+        a3 = (sum2_t)(pix1[3] - pix2[3]);
         b1 = (a2+a3) + ((a2-a3)<<BITS_PER_SUM);
         tmp[i][0] = b0 + b1;
         tmp[i][1] = b0 - b1;
@@ -292,10 +292,10 @@ static NOINLINE int x264_pixel_satd_8x4( pixel *pix1, intptr_t i_pix1, pixel *pi
     sum2_t sum = 0;
     for( int i = 0; i < 4; i++, pix1 += i_pix1, pix2 += i_pix2 )
     {
-        a0 = (pix1[0] - pix2[0]) + ((sum2_t)(pix1[4] - pix2[4]) << BITS_PER_SUM);
-        a1 = (pix1[1] - pix2[1]) + ((sum2_t)(pix1[5] - pix2[5]) << BITS_PER_SUM);
-        a2 = (pix1[2] - pix2[2]) + ((sum2_t)(pix1[6] - pix2[6]) << BITS_PER_SUM);
-        a3 = (pix1[3] - pix2[3]) + ((sum2_t)(pix1[7] - pix2[7]) << BITS_PER_SUM);
+        a0 = (sum2_t)(pix1[0] - pix2[0]) + ((sum2_t)(pix1[4] - pix2[4]) << BITS_PER_SUM);
+        a1 = (sum2_t)(pix1[1] - pix2[1]) + ((sum2_t)(pix1[5] - pix2[5]) << BITS_PER_SUM);
+        a2 = (sum2_t)(pix1[2] - pix2[2]) + ((sum2_t)(pix1[6] - pix2[6]) << BITS_PER_SUM);
+        a3 = (sum2_t)(pix1[3] - pix2[3]) + ((sum2_t)(pix1[7] - pix2[7]) << BITS_PER_SUM);
         HADAMARD4( tmp[i][0], tmp[i][1], tmp[i][2], tmp[i][3], a0,a1,a2,a3 );
     }
     for( int i = 0; i < 4; i++ )
@@ -336,17 +336,17 @@ static NOINLINE int sa8d_8x8( pixel *pix1, intptr_t i_pix1, pixel *pix2, intptr_
     sum2_t sum = 0;
     for( int i = 0; i < 8; i++, pix1 += i_pix1, pix2 += i_pix2 )
     {
-        a0 = pix1[0] - pix2[0];
-        a1 = pix1[1] - pix2[1];
+        a0 = (sum2_t)(pix1[0] - pix2[0]);
+        a1 = (sum2_t)(pix1[1] - pix2[1]);
         b0 = (a0+a1) + ((a0-a1)<<BITS_PER_SUM);
-        a2 = pix1[2] - pix2[2];
-        a3 = pix1[3] - pix2[3];
+        a2 = (sum2_t)(pix1[2] - pix2[2]);
+        a3 = (sum2_t)(pix1[3] - pix2[3]);
         b1 = (a2+a3) + ((a2-a3)<<BITS_PER_SUM);
-        a4 = pix1[4] - pix2[4];
-        a5 = pix1[5] - pix2[5];
+        a4 = (sum2_t)(pix1[4] - pix2[4]);
+        a5 = (sum2_t)(pix1[5] - pix2[5]);
         b2 = (a4+a5) + ((a4-a5)<<BITS_PER_SUM);
-        a6 = pix1[6] - pix2[6];
-        a7 = pix1[7] - pix2[7];
+        a6 = (sum2_t)(pix1[6] - pix2[6]);
+        a7 = (sum2_t)(pix1[7] - pix2[7]);
         b3 = (a6+a7) + ((a6-a7)<<BITS_PER_SUM);
         HADAMARD4( tmp[i][0], tmp[i][1], tmp[i][2], tmp[i][3], b0,b1,b2,b3 );
     }
@@ -888,7 +888,6 @@ void x264_pixel_init( uint32_t cpu, x264_pixel_function_t *pixf )
         INIT7( satd_x4, _mmx2 );
         INIT4( hadamard_ac, _mmx2 );
         INIT8( ssd, _mmx2 );
-        INIT_ADS( _mmx2 );
 
         pixf->intra_sad_x3_4x4    = intra_sad_x3_4x4_mmx2;
         pixf->intra_satd_x3_4x4   = x264_intra_satd_x3_4x4_mmx2;
@@ -961,9 +960,7 @@ void x264_pixel_init( uint32_t cpu, x264_pixel_function_t *pixf )
         INIT7( sad, _ssse3 );
         INIT7( sad_x3, _ssse3 );
         INIT7( sad_x4, _ssse3 );
-#if ARCH_X86 || !defined( __MACH__ )
         INIT_ADS( _ssse3 );
-#endif
         INIT6( satd, _ssse3 );
         pixf->satd[PIXEL_4x16] = x264_pixel_satd_4x16_ssse3;
 
@@ -1003,9 +1000,7 @@ void x264_pixel_init( uint32_t cpu, x264_pixel_function_t *pixf )
     if( cpu&X264_CPU_AVX )
     {
         INIT5_NAME( sad_aligned, sad, _ssse3 ); /* AVX-capable CPUs doesn't benefit from an aligned version */
-#if ARCH_X86 || !defined( __MACH__ )
         INIT_ADS( _avx );
-#endif
         INIT6( satd, _avx );
         pixf->satd[PIXEL_4x16] = x264_pixel_satd_4x16_avx;
         if( !(cpu&X264_CPU_STACK_MOD4) )
@@ -1043,6 +1038,7 @@ void x264_pixel_init( uint32_t cpu, x264_pixel_function_t *pixf )
         INIT2_NAME( sad_aligned, sad, _avx2 );
         INIT2( sad_x3, _avx2 );
         INIT2( sad_x4, _avx2 );
+        INIT_ADS( _avx2 );
         pixf->var[PIXEL_16x16] = x264_pixel_var_16x16_avx2;
         pixf->var2[PIXEL_8x8]  = x264_pixel_var2_8x8_avx2;
         pixf->var2[PIXEL_8x16] = x264_pixel_var2_8x16_avx2;
@@ -1201,9 +1197,7 @@ void x264_pixel_init( uint32_t cpu, x264_pixel_function_t *pixf )
             pixf->intra_sa8d_x9_8x8 = x264_intra_sa8d_x9_8x8_ssse3;
 #endif
         }
-#if ARCH_X86 || !defined( __MACH__ )
         INIT_ADS( _ssse3 );
-#endif
         if( cpu&X264_CPU_SLOW_ATOM )
         {
             pixf->sa8d[PIXEL_16x16]= x264_pixel_sa8d_16x16_ssse3_atom;
@@ -1286,9 +1280,7 @@ void x264_pixel_init( uint32_t cpu, x264_pixel_function_t *pixf )
         INIT8( satd, _avx );
         INIT7( satd_x3, _avx );
         INIT7( satd_x4, _avx );
-#if ARCH_X86 || !defined( __MACH__ )
         INIT_ADS( _avx );
-#endif
         INIT4( hadamard_ac, _avx );
         if( !(cpu&X264_CPU_STACK_MOD4) )
         {
@@ -1341,9 +1333,7 @@ void x264_pixel_init( uint32_t cpu, x264_pixel_function_t *pixf )
         INIT2( sad_x4, _avx2 );
         INIT4( satd, _avx2 );
         INIT2( hadamard_ac, _avx2 );
-#if ARCH_X86 || !defined( __MACH__ )
         INIT_ADS( _avx2 );
-#endif
         pixf->sa8d[PIXEL_8x8]  = x264_pixel_sa8d_8x8_avx2;
         pixf->var[PIXEL_16x16] = x264_pixel_var_16x16_avx2;
         pixf->var2[PIXEL_8x16]  = x264_pixel_var2_8x16_avx2;

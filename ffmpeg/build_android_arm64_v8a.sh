@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #arm64 最小必须是android-21
-PLATFORM=$NDK/platforms/android-21/arch-arm64/
+PLATFORM=$NDK/platforms/android-21/arch-arm64
 PREBUILT=$NDK/toolchains/aarch64-linux-android-4.9/prebuilt/darwin-x86_64
 
 

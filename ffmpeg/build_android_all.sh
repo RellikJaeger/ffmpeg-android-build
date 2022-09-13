@@ -117,7 +117,7 @@ export COMMON_SET="--enable-static \
 ./build_android_armeabi_v7a.sh
 
 # Build arm64 v8a
-./build_android_arm64_v8a.sh
+#./build_android_arm64_v8a.sh
 
 # Build x86
 # ./build_android_x86.sh

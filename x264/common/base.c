@@ -1,7 +1,7 @@
 /*****************************************************************************
  * base.c: misc common functions (bit depth independent)
  *****************************************************************************
- * Copyright (C) 2003-2020 x264 project
+ * Copyright (C) 2003-2022 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -34,6 +34,8 @@
 #if HAVE_THP
 #include <sys/mman.h>
 #endif
+
+#define X264_ISDIGIT(x) isdigit((unsigned char)(x))
 
 /****************************************************************************
  * x264_reduce_fraction:
@@ -196,6 +198,66 @@ char *x264_slurp_file( const char *filename )
 error:
     fclose( fh );
     return NULL;
+}
+
+/****************************************************************************
+ * x264_param_strdup:
+ ****************************************************************************/
+typedef struct {
+    int size;
+    int count;
+    void *ptr[];
+} strdup_buffer;
+
+#define BUFFER_OFFSET (int)offsetof(strdup_buffer, ptr)
+#define BUFFER_DEFAULT_SIZE 16
+
+char *x264_param_strdup( x264_param_t *param, const char *src )
+{
+    strdup_buffer *buf = param->opaque;
+    if( !buf )
+    {
+        buf = malloc( BUFFER_OFFSET + BUFFER_DEFAULT_SIZE * sizeof(void *) );
+        if( !buf )
+            goto fail;
+        buf->size = BUFFER_DEFAULT_SIZE;
+        buf->count = 0;
+        param->opaque = buf;
+    }
+    else if( buf->count == buf->size )
+    {
+        if( buf->size > (INT_MAX - BUFFER_OFFSET) / 2 / (int)sizeof(void *) )
+            goto fail;
+        int new_size = buf->size * 2;
+        buf = realloc( buf, BUFFER_OFFSET + new_size * sizeof(void *) );
+        if( !buf )
+            goto fail;
+        buf->size = new_size;
+        param->opaque = buf;
+    }
+    char *res = strdup( src );
+    if( !res )
+        goto fail;
+    buf->ptr[buf->count++] = res;
+    return res;
+fail:
+    x264_log_internal( X264_LOG_ERROR, "x264_param_strdup failed\n" );
+    return NULL;
+}
+
+/****************************************************************************
+ * x264_param_cleanup:
+ ****************************************************************************/
+REALIGN_STACK void x264_param_cleanup( x264_param_t *param )
+{
+    strdup_buffer *buf = param->opaque;
+    if( buf )
+    {
+        for( int i = 0; i < buf->count; i++ )
+            free( buf->ptr[i] );
+        free( buf );
+        param->opaque = NULL;
+    }
 }
 
 /****************************************************************************
@@ -754,7 +816,7 @@ REALIGN_STACK int x264_param_apply_profile( x264_param_t *param, const char *pro
 static int parse_enum( const char *arg, const char * const *names, int *dst )
 {
     for( int i = 0; names[i]; i++ )
-        if( !strcasecmp( arg, names[i] ) )
+        if( *names[i] && !strcasecmp( arg, names[i] ) )
         {
             *dst = i;
             return 0;
@@ -811,6 +873,15 @@ static double atof_internal( const char *str, int *b_error )
 #undef atof
 #define atoi(str) atoi_internal( str, &b_error )
 #define atof(str) atof_internal( str, &b_error )
+#define CHECKED_ERROR_PARAM_STRDUP( var, param, src )\
+do {\
+    var = x264_param_strdup( param, src );\
+    if( !var )\
+    {\
+        b_error = 1;\
+        errortype = X264_PARAM_ALLOC_FAILED;\
+    }\
+} while( 0 )
 
 REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const char *value )
 {
@@ -833,7 +904,7 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
         char *c;
         name_buf = strdup(name);
         if( !name_buf )
-            return X264_PARAM_BAD_NAME;
+            return X264_PARAM_ALLOC_FAILED;
         while( (c = strchr( name_buf, '_' )) )
             *c = '-';
         name = name_buf;
@@ -853,7 +924,7 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
     if( 0 );
     OPT("asm")
     {
-        p->cpu = isdigit(value[0]) ? atoi(value) :
+        p->cpu = X264_ISDIGIT(value[0]) ? (uint32_t)atoi(value) :
                  !strcasecmp(value, "auto") || atobool(value) ? x264_cpu_detect() : 0;
         if( b_error )
         {
@@ -876,6 +947,8 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
                 if( (p->cpu&X264_CPU_SSSE3) && !(p->cpu&X264_CPU_SSE2_IS_SLOW) )
                     p->cpu |= X264_CPU_SSE2_IS_FAST;
             }
+            else
+                errortype = X264_PARAM_ALLOC_FAILED;
         }
     }
     OPT("threads")
@@ -922,8 +995,8 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
         b_error |= parse_enum( value, x264_avcintra_flavor_names, &p->i_avcintra_flavor );
     OPT("sar")
     {
-        b_error = ( 2 != sscanf( value, "%d:%d", &p->vui.i_sar_width, &p->vui.i_sar_height ) &&
-                    2 != sscanf( value, "%d/%d", &p->vui.i_sar_width, &p->vui.i_sar_height ) );
+        b_error |= ( 2 != sscanf( value, "%d:%d", &p->vui.i_sar_width, &p->vui.i_sar_height ) &&
+                     2 != sscanf( value, "%d/%d", &p->vui.i_sar_width, &p->vui.i_sar_height ) );
     }
     OPT("overscan")
         b_error |= parse_enum( value, x264_overscan_names, &p->vui.i_overscan );
@@ -940,16 +1013,52 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
     OPT("chromaloc")
     {
         p->vui.i_chroma_loc = atoi(value);
-        b_error = ( p->vui.i_chroma_loc < 0 || p->vui.i_chroma_loc > 5 );
+        b_error |= ( p->vui.i_chroma_loc < 0 || p->vui.i_chroma_loc > 5 );
+    }
+    OPT("mastering-display")
+    {
+        if( strcasecmp( value, "undef" ) )
+        {
+            b_error |= sscanf( value, "G(%d,%d)B(%d,%d)R(%d,%d)WP(%d,%d)L(%"SCNd64",%"SCNd64")",
+                               &p->mastering_display.i_green_x, &p->mastering_display.i_green_y,
+                               &p->mastering_display.i_blue_x, &p->mastering_display.i_blue_y,
+                               &p->mastering_display.i_red_x, &p->mastering_display.i_red_y,
+                               &p->mastering_display.i_white_x, &p->mastering_display.i_white_y,
+                               &p->mastering_display.i_display_max, &p->mastering_display.i_display_min ) != 10;
+            p->mastering_display.b_mastering_display = !b_error;
+        }
+        else
+            p->mastering_display.b_mastering_display = 0;
+    }
+    OPT("cll")
+    {
+        if( strcasecmp( value, "undef" ) )
+        {
+            b_error |= sscanf( value, "%d,%d",
+                               &p->content_light_level.i_max_cll, &p->content_light_level.i_max_fall ) != 2;
+            p->content_light_level.b_cll = !b_error;
+        }
+        else
+            p->content_light_level.b_cll = 0;
     }
     OPT("alternative-transfer")
         b_error |= parse_enum( value, x264_transfer_names, &p->i_alternative_transfer );
     OPT("fps")
     {
-        if( sscanf( value, "%u/%u", &p->i_fps_num, &p->i_fps_den ) != 2 )
+        int64_t i_fps_num;
+        int64_t i_fps_den;
+        if( sscanf( value, "%"SCNd64"/%"SCNd64, &i_fps_num, &i_fps_den ) == 2 )
+        {
+            p->i_fps_num = i_fps_num;
+            p->i_fps_den = i_fps_den;
+            b_error |= i_fps_num < 1 || i_fps_num > UINT32_MAX || i_fps_den < 1 || i_fps_den > UINT32_MAX;
+        }
+        else
         {
             double fps = atof(value);
-            if( fps > 0.0 && fps <= INT_MAX/1000.0 )
+            if( fps < 0.0005 || fps > INT_MAX )
+                b_error = 1;
+            else if( fps <= INT_MAX/1000.0 )
             {
                 p->i_fps_num = (int)(fps * 1000.0 + .5);
                 p->i_fps_den = 1000;
@@ -1062,10 +1171,10 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
         else if( strstr( value, "jvt" ) )
             p->i_cqm_preset = X264_CQM_JVT;
         else
-            p->psz_cqm_file = strdup(value);
+            CHECKED_ERROR_PARAM_STRDUP( p->psz_cqm_file, p, value );
     }
     OPT("cqmfile")
-        p->psz_cqm_file = strdup(value);
+        CHECKED_ERROR_PARAM_STRDUP( p->psz_cqm_file, p, value );
     OPT("cqm4")
     {
         p->i_cqm_preset = X264_CQM_CUSTOM;
@@ -1129,7 +1238,7 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
     OPT("log")
         p->i_log_level = atoi(value);
     OPT("dump-yuv")
-        p->psz_dump_yuv = strdup(value);
+        CHECKED_ERROR_PARAM_STRDUP( p->psz_dump_yuv, p, value );
     OPT2("analyse", "partitions")
     {
         p->analyse.inter = 0;
@@ -1245,8 +1354,8 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
     }
     OPT("stats")
     {
-        p->rc.psz_stat_in = strdup(value);
-        p->rc.psz_stat_out = strdup(value);
+        CHECKED_ERROR_PARAM_STRDUP( p->rc.psz_stat_in, p, value );
+        CHECKED_ERROR_PARAM_STRDUP( p->rc.psz_stat_out, p, value );
     }
     OPT("qcomp")
         p->rc.f_qcompress = atof(value);
@@ -1257,7 +1366,7 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
     OPT2("cplxblur", "cplx-blur")
         p->rc.f_complexity_blur = atof(value);
     OPT("zones")
-        p->rc.psz_zones = strdup(value);
+        CHECKED_ERROR_PARAM_STRDUP( p->rc.psz_zones, p, value );
     OPT("crop-rect")
         b_error |= sscanf( value, "%d,%d,%d,%d", &p->crop_rect.i_left, &p->crop_rect.i_top,
                                                  &p->crop_rect.i_right, &p->crop_rect.i_bottom ) != 4;
@@ -1292,7 +1401,7 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
     OPT("opencl")
         p->b_opencl = atobool( value );
     OPT("opencl-clbin")
-        p->psz_clbin_file = strdup( value );
+        CHECKED_ERROR_PARAM_STRDUP( p->psz_clbin_file, p, value );
     OPT("opencl-device")
         p->i_opencl_device = atoi( value );
     else
@@ -1318,7 +1427,7 @@ REALIGN_STACK int x264_param_parse( x264_param_t *p, const char *name, const cha
  ****************************************************************************/
 char *x264_param2string( x264_param_t *p, int b_res )
 {
-    int len = 1000;
+    int len = 2000;
     char *buf, *s;
     if( p->rc.psz_zones )
         len += strlen(p->rc.psz_zones);
@@ -1427,6 +1536,16 @@ char *x264_param2string( x264_param_t *p, int b_res )
     if( p->crop_rect.i_left | p->crop_rect.i_top | p->crop_rect.i_right | p->crop_rect.i_bottom )
         s += sprintf( s, " crop_rect=%d,%d,%d,%d", p->crop_rect.i_left, p->crop_rect.i_top,
                                                    p->crop_rect.i_right, p->crop_rect.i_bottom );
+    if( p->mastering_display.b_mastering_display )
+        s += sprintf( s, " mastering-display=G(%d,%d)B(%d,%d)R(%d,%d)WP(%d,%d)L(%"PRId64",%"PRId64")",
+                      p->mastering_display.i_green_x, p->mastering_display.i_green_y,
+                      p->mastering_display.i_blue_x, p->mastering_display.i_blue_y,
+                      p->mastering_display.i_red_x, p->mastering_display.i_red_y,
+                      p->mastering_display.i_white_x, p->mastering_display.i_white_y,
+                      p->mastering_display.i_display_max, p->mastering_display.i_display_min );
+    if( p->content_light_level.b_cll )
+        s += sprintf( s, " cll=%d,%d",
+                      p->content_light_level.i_max_cll, p->content_light_level.i_max_fall );
     if( p->i_frame_packing >= 0 )
         s += sprintf( s, " frame-packing=%d", p->i_frame_packing );
 

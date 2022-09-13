@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PLATFORM=$NDK/platforms/android-16/arch-arm/
+PLATFORM=$NDK/platforms/android-16/arch-arm
 PREBUILT=$NDK/toolchains/arm-linux-androideabi-4.9/prebuilt/darwin-x86_64
 
 echo PLATFORM=${PLATFORM}
@@ -24,12 +24,13 @@ export PATH=$PREBUILT/bin/:$PATH/
 
 function build_ARMv7() {
   ./configure \
+    --pkg-config="--static" \
     --target-os=android \
     --prefix=${temp_prefix} \
     ${GENERAL} \
     --sysroot=$PLATFORM \
     --extra-cflags="-DANDROID -fPIC -ffunction-sections -funwind-tables -fstack-protector -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16 -fomit-frame-pointer -fstrict-aliasing -funswitch-loops -finline-limit=300" \
-    --extra-ldflags="-Wl,-rpath-link=$PLATFORM/usr/lib -L$PLATFORM/usr/lib -nostdlib -lc -lm -ldl -llog" \
+    --extra-ldflags="-lx264 -Wl,-rpath-link=$PLATFORM/usr/lib -L$PLATFORM/usr/lib -nostdlib -lc -lm -ldl -llog" \
     ${COMMON_SET} \
     --disable-doc \
     --enable-neon

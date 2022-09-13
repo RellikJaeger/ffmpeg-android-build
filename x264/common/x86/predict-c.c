@@ -1,7 +1,7 @@
 /*****************************************************************************
  * predict-c.c: intra prediction
  *****************************************************************************
- * Copyright (C) 2003-2020 x264 project
+ * Copyright (C) 2003-2022 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -62,7 +62,7 @@ ALIGNED_8( static const int8_t pb_m32101234[8] ) = {-3,-2,-1,0,1,2,3,4};
     int b = ( 5 * H + 32 ) >> 6;\
     int c = ( 5 * V + 32 ) >> 6;\
     int i00 = a - b * 7 - c * 7 + 16;\
-    /* b*15 + c*15 can overflow: it's easier to just branch away in this rare case
+    /* b*15 + c*15 can overflow: it's easier to just branch away in this rare case\
      * than to try to consider it in the asm. */\
     if( BIT_DEPTH > 8 && (i00 > 0x7fff || abs(b) > 1092 || abs(c) > 1092) )\
         x264_predict_16x16_p_c( src );\
@@ -91,8 +91,11 @@ static void predict_16x16_p_##name( pixel *src )\
         "paddd        %%xmm1, %%xmm0 \n"\
         "movd         %%xmm0, %0     \n"\
         :"=r"(H)\
-        :"m"(src[-FDEC_STRIDE-1]), "m"(src[-FDEC_STRIDE+8]),\
-         "m"(*pw_12345678), "m"(*pw_m87654321)\
+        :"m"(MEM_FIX(&src[-FDEC_STRIDE-1], const pixel, 8)),\
+         "m"(MEM_FIX(&src[-FDEC_STRIDE+8], const pixel, 8)),\
+         "m"(MEM_FIX(pw_12345678, const int16_t, 8)),\
+         "m"(MEM_FIX(pw_m87654321, const int16_t, 8))\
+        :"xmm0", "xmm1"\
     );
 #else // !HIGH_BIT_DEPTH
 #define PREDICT_16x16_P_ASM\
@@ -110,8 +113,12 @@ static void predict_16x16_p_##name( pixel *src )\
         "movd        %%mm0, %0    \n"\
         "movswl        %w0, %0    \n"\
         :"=r"(H)\
-        :"m"(src[-FDEC_STRIDE]), "m"(src[-FDEC_STRIDE+8]),\
-         "m"(src[-FDEC_STRIDE-8]), "m"(*pb_12345678), "m"(*pb_m87654321)\
+        :"m"(MEM_FIX(&src[-FDEC_STRIDE], const pixel, 8)),\
+         "m"(MEM_FIX(&src[-FDEC_STRIDE+8], const pixel, 8)),\
+         "m"(MEM_FIX(&src[-FDEC_STRIDE-8], const pixel, 8)),\
+         "m"(MEM_FIX(pb_12345678, const int8_t, 8)),\
+         "m"(MEM_FIX(pb_m87654321, const int8_t, 8))\
+        :"mm0", "mm1"\
     );
 #endif // HIGH_BIT_DEPTH
 
@@ -229,7 +236,9 @@ static void predict_8x8c_p_##name( pixel *src )\
         "paddd        %%xmm1, %%xmm0 \n"\
         "movd         %%xmm0, %0     \n"\
         :"=r"(H)\
-        :"m"(src[-FDEC_STRIDE]), "m"(*pw_m32101234)\
+        :"m"(MEM_FIX(&src[-FDEC_STRIDE], const pixel, 8)),\
+         "m"(MEM_FIX(pw_m32101234, const int16_t, 8))\
+        :"xmm0", "xmm1"\
     );
 #else // !HIGH_BIT_DEPTH
 #define PREDICT_8x8C_P_ASM\
@@ -243,7 +252,9 @@ static void predict_8x8c_p_##name( pixel *src )\
         "movd        %%mm0, %0    \n"\
         "movswl        %w0, %0    \n"\
         :"=r"(H)\
-        :"m"(src[-FDEC_STRIDE]), "m"(*pb_m32101234)\
+        :"m"(MEM_FIX(&src[-FDEC_STRIDE], const pixel, 8)),\
+         "m"(MEM_FIX(pb_m32101234, const int8_t, 8))\
+        :"mm0", "mm1"\
     );
 #endif // HIGH_BIT_DEPTH
 
