@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PLATFORM=$NDK/platforms/android-14/arch-arm/
+PLATFORM=$NDK/platforms/android-16/arch-arm/
 TOOLCHAIN=$NDK/toolchains/arm-linux-androideabi-4.9/prebuilt/darwin-x86_64
 
 temp_prefix=${PREFIX}/x264/android/arm
