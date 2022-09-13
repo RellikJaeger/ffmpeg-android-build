@@ -68,8 +68,8 @@ export COMMON_SET="--enable-static \
   --enable-encoder=png \
   --enable-encoder=libmp3lame \
   --enable-encoder=mjpeg \
-  --enable-encoder=mpeg4 \
   --enable-encoder=gif \
+  --enable-encoder=libx264 \
   --enable-swscale \
   --disable-filters \
   --enable-filter=crop \
@@ -100,7 +100,8 @@ export COMMON_SET="--enable-static \
   --enable-filter=amix \
   --enable-filter=anull \
   --enable-filter=adelay \
-  --disable-gpl \
+  --enable-gpl \
+  --enable-libx264 \
   --enable-zlib \
   --enable-libmp3lame \
   --enable-jni \
