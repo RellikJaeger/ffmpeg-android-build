@@ -2,15 +2,14 @@
 
 ### 中文文档：
 
-1. 目前该脚本支持armeabi-v7a arm64-v8a，目前我对FFmpeg裁剪了很多目前编译出来的库4M多，音视频开发常见的功能都包含进去了
-2. ffmpeg 版本5.1.0
+1. 目前该脚本支持armeabi-v7a arm64-v8a，支持libx264,libmp3lame，mediacodec，目前我对FFmpeg裁剪了很多目前编译出来的库5.8M，音视频开发常见的功能都包含进去了，要满足日常开发最低可以裁剪到3M左右，如果需求你们可以自行去掉一些配置
+2. ffmpeg 版本5.1.1
 4. NDK版本r14b，下载地址：https://developer.android.com/ndk/downloads/older_releases (这个是Google的需要科学上网, 我下载了一份放到了我的服务器上：https://www.raoyunsoft.com/public/android-ndk-r14b-darwin-x86_64.zip)
 5. build目录下是已经编译好的, 如果不能编译就先用着吧
-6. 编译环境Mac 12.5.1（理论上其它环境也可以使用这个脚本编译）
-
+6. 编译环境Mac 12.6（理论上其它环境也可以使用这个脚本编译）
 
 FFMpeg下载地址： http://ffmpeg.org/download.html
-没有采用libx264，libx264是GPL协议，对商业软件不优化友好，采用了mpeg4代替视频编码
+
 
 ### Build
 必备软件:autoconf automake libtool pkg-config curl cmake gcc gperf texinfo yasm nasm bison autogen
@@ -27,16 +26,13 @@ FFMpeg下载地址： http://ffmpeg.org/download.html
 
 ### English documentation：
 
-1. The script currently supports armeabi-v7a arm64-v8a. At present, I have cropped a lot of the currently compiled library 4M for FFmpeg, and the common functions of audio and video development are included.
-2. ffmpeg version 5.1.0
+1. At present, the script supports armeabi-v7a arm64-v8a, libx264, libmp3lame, mediacodec. At present, I have cut a lot of the currently compiled library 5.8M for FFmpeg, and the common functions of audio and video development are included. To meet the daily development requirements, the minimum Cut to about 3M, if you need, you can remove some configurations by yourself.
+2. ffmpeg version 5.1.1
 4. NDK version r14b, download address: https://developer.android.com/ndk/downloads/older_releases
 5. The build directory is already compiled, if you can't compile, use it first
-6. Compile environment Mac 12.5.1 (in theory, other environments can also use this script to compile)
-
-
+6. Compile environment Mac 12.6 (other environments can also use this script to compile)
 
 FFMpeg download address: http://ffmpeg.org/download.html
-Not using libx264, libx264 is GPL protocol, not friendly to commercial software optimization, using mpeg4 instead of video encoding
 
 
 ### Build
