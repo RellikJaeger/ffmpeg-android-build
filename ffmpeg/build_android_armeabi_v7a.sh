@@ -24,7 +24,7 @@ export PATH=$PREBUILT/bin/:$PATH/
 
 function build_ARMv7() {
   ./configure \
-    --pkg-config="--static" \
+    --pkg-config="pkg-config --static" \
     --target-os=android \
     --prefix=${temp_prefix} \
     ${GENERAL} \

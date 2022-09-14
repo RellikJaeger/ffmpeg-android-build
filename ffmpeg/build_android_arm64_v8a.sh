@@ -27,6 +27,7 @@ export PATH=$PREBUILT/bin/:$PATH/
 function build_arm64
 {
   ./configure \
+  --pkg-config="pkg-config --static" \
   --logfile=conflog.txt \
   --target-os=android \
   --prefix=${temp_prefix} \
