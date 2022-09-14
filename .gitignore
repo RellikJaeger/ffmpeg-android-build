@@ -150,7 +150,7 @@ dkms.conf
 # Precompiled Headers
 
 # Compiled Dynamic libraries
-*.so
+#*.so
 *.dylib
 *.dll
 
@@ -158,7 +158,7 @@ dkms.conf
 
 # Compiled Static libraries
 *.la
-*.a
+#*.a
 *.lib
 
 # Executables
